@@ -166,7 +166,7 @@ int main(int argc, char **argv){
      			printf("\nOK: enc/dec ok for \"%s\"\n", plaintext);
 		
 
-         		printf("Key No.:%d:", counter);
+         		printf("Key No.:%zu:", counter);
          		for(y=0;y<32;y++){
               			printf("%c",trialkey[y]); 
 	 		}
