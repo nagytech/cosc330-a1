@@ -78,7 +78,11 @@ int main(int argc, char **argv){
     }
 
     FILE *myfile;    
-    myfile=fopen("cipher.txt","r");
+    myfile=fopen("./data/cipher.txt","r");
+    if (myfile == NULL) {
+        printf("Could not read from file ./data/cipher.txt");
+        return -1;
+    }
     unsigned char cipher_in[4096];
     int c_in = 0;
     unsigned char c;

@@ -67,7 +67,11 @@ int main(int argc, char **argv){
     //This is the plaintext length - should be dynamic
     plen = 28;
     FILE *myplainfile;    
-    myplainfile=fopen("plain.txt","r");
+    myplainfile=fopen("./data/plain.txt","r");
+    if (myplainfile == NULL) {
+        printf("Could not read from file");
+		    return -1;
+    }
     char plainText[4096];
     fread(plainText, plen, 1, myplainfile);
 

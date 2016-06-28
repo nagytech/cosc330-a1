@@ -71,14 +71,22 @@ int main(int argc, char **argv){
     
     int cipher_length = 32;
     FILE *mycipherfile;    
-    mycipherfile=fopen("cipher.txt","r");
+    mycipherfile=fopen("./data/cipher.txt","r");
+    if (mycipherfile == NULL) {
+    		printf("Could not open file ./data/cipher.txt");
+				return -1;
+    }
     unsigned char cipher_in[4096];
     int c_in = 0;
     unsigned char c;
     fread(cipher_in, cipher_length, 1, mycipherfile);
     
     FILE *myplainfile;    
-    myplainfile=fopen("plain.txt","r");
+    myplainfile=fopen("./data/plain.txt","r");
+    if (myplainfile == NULL) {
+    		printf("Could not open file ./data/plain.txt");
+				return -1;
+    }
     char plain_in[4096];
     fread(plain_in, 28, 1, myplainfile);
    
