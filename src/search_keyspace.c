@@ -1,16 +1,47 @@
 #include <string.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <unistd.h>
+#include <errno.h>
 #include <openssl/evp.h>
 #include <openssl/aes.h>
 
 #define MAX_KEY_LENGTH 32
 #define CIPHER_LENGTH 32
+#define MAX_BUFFER 4096
+
+int make_trivial_ring(){
+  int   fd[2];
+  if (pipe (fd) == -1)
+    return(-1);
+  if ((dup2(fd[0], STDIN_FILENO) == -1) ||
+      (dup2(fd[1], STDOUT_FILENO) == -1))
+    return(-2);
+  if ((close(fd[0]) == -1) || (close(fd[1]) == -1))
+    return(-3);
+  return(0);
+}
+
+int add_new_node(int *pid){
+  int fd[2];
+  if (pipe(fd) == -1)
+    return(-1);
+  if ((*pid = fork()) == -1)
+    return(-2);
+  if(*pid > 0 && dup2(fd[1], STDOUT_FILENO) < 0)
+    return(-3);
+  if (*pid == 0 && dup2(fd[0], STDIN_FILENO) < 0)
+    return(-4);
+  if ((close(fd[0]) == -1) || (close(fd[1]) == -1))
+    return(-5);
+  return(0);
+}
 
 /*
  * Decrypt *len bytes of ciphertext
  */
-unsigned char *aes_decrypt(EVP_CIPHER_CTX *e, unsigned char *ciphertext, int *len)
+unsigned char *aes_decrypt(EVP_CIPHER_CTX *e, unsigned char *ciphertext,
+  int *len)
 {
   int p_len = *len;
   int f_len = 0;
@@ -24,7 +55,8 @@ unsigned char *aes_decrypt(EVP_CIPHER_CTX *e, unsigned char *ciphertext, int *le
   return plaintext;
 }
 
-int aes_init(unsigned char *key_data, int key_data_len, EVP_CIPHER_CTX *e_ctx, EVP_CIPHER_CTX *d_ctx){
+int aes_init(unsigned char *key_data, int key_data_len, EVP_CIPHER_CTX *e_ctx,
+  EVP_CIPHER_CTX *d_ctx){
 
   int i;
   unsigned char key[MAX_KEY_LENGTH], iv[MAX_KEY_LENGTH];
@@ -52,7 +84,8 @@ int aes_init(unsigned char *key_data, int key_data_len, EVP_CIPHER_CTX *e_ctx, E
 
 }
 
-void bump_key(unsigned char* trialkey, unsigned long keyLowBits, int iteration, int missingBytes) {
+void bump_key(unsigned char* trialkey, unsigned long keyLowBits, int iteration,
+  int missingBytes) {
 
   unsigned long trialLowBits = keyLowBits | iteration;
 
@@ -81,9 +114,10 @@ void read_file(char *name, void *buffer, int length) {
 
 }
 
-int parse_args(int argc, char **argv, int *numprocs, unsigned char **key_data, int *key_data_len) {
+int parse_args(int argc, char **argv, int *numnodes, unsigned char **key_data,
+  int *key_data_len) {
 
-    *numprocs = atoi(argv[1]);
+    *numnodes = atoi(argv[1]);
     *key_data = (unsigned char *)argv[2];
     *key_data_len = strlen(argv[2]);
     if(*key_data_len > MAX_KEY_LENGTH) {
@@ -94,13 +128,79 @@ int parse_args(int argc, char **argv, int *numprocs, unsigned char **key_data, i
 
 }
 
+int try_solve(char *keybase, int key_length, char *cipher_in, int cipher_length,
+   char *plain_in, int missingBytes, unsigned long seed,
+   unsigned long keyLowBits) {
+
+  unsigned char trialkey[MAX_KEY_LENGTH];
+  int trial_key_length = key_length;
+
+  for (int i = 0; i < key_length; i++) {
+    trialkey[i] = keybase[i];
+  }
+
+  unsigned long trialLowBits = keyLowBits | seed;
+
+  // TODO: Use bump key
+
+  for (int i = 0; i < missingBytes; i++) {
+    int index = MAX_KEY_LENGTH - i - 1;
+    //printf("Key bump index: %d\n", index);
+    char bumpChar = (unsigned char) (trialLowBits >> i * 8);
+    //printf("Key bump char: %c\n", bumpChar);
+    trialkey[MAX_KEY_LENGTH - i - 1] = (unsigned char) (trialLowBits >> (i * 8));
+  }
+  //printf("STARTKEY[[");
+  //for(int y = 0; y < MAX_KEY_LENGTH; y++) {
+  //  printf("%c", trialkey[y]);
+  //}
+  //printf("]]ENDKEY\n");
+
+  //exit(-1);
+
+	EVP_CIPHER_CTX en, de;
+
+	if (aes_init(trialkey, trial_key_length, &en, &de)) {
+  	   printf("Couldn't initialize AES cipher\n");
+  	   return -1;
+	}
+
+	char *plaintext = (char *)aes_decrypt(&de, (unsigned char *)cipher_in,
+    &cipher_length);
+
+  EVP_CIPHER_CTX_cleanup(&en);
+  EVP_CIPHER_CTX_cleanup(&de);
+
+  // TODO: compare length, then compare length of plain in (iff equal length)
+  if (!strncmp(plaintext, plain_in, 32)) {
+
+		printf("\nOK: enc/dec ok for \"%s\"\n", plaintext);
+		printf("Key No.:%lu:", seed);
+
+		for(int y = 0; y < MAX_KEY_LENGTH; y++) {
+      printf("%c", trialkey[y]);
+    }
+    printf("\n");
+
+    // TODO: Write out the thingy
+
+    return 1;
+
+	} else {
+
+    //fprintf(stderr, "Seed %lu Failed\n", seed);
+    return -1;
+
+  }
+}
+
 int main(int argc, char **argv)
 {
   /* Parse arguments */
-  int numprocs, key_data_len;
+  int numnodes, key_data_len;
   unsigned char *key_data;
 
-  if (parse_args(argc, argv, &numprocs, &key_data, &key_data_len) < 0) {
+  if (parse_args(argc, argv, &numnodes, &key_data, &key_data_len) < 0) {
     exit(-1);
   }
 
@@ -128,18 +228,15 @@ int main(int argc, char **argv)
 
   /* Copy key and pad with zeros */
 
-  unsigned char key[MAX_KEY_LENGTH], trialkey[MAX_KEY_LENGTH];
+  unsigned char key[MAX_KEY_LENGTH];
 
   for (int i = 0; i < key_data_len; i++) {
    key[i] = key_data[i];
-   trialkey[i] = key_data[i];
   }
 
   for (int i = key_data_len; i < MAX_KEY_LENGTH; i++){
    key[i] = 0;
-   trialkey[i] = 0;
   }
-
 
   unsigned long keyLowBits = 0;
 
@@ -148,65 +245,69 @@ int main(int argc, char **argv)
   	((unsigned long)(key[30] & 0xFFFF)<< 8)|
   	((unsigned long)(key[31] & 0xFFFF)));
 
-  int trial_key_length = MAX_KEY_LENGTH;
   unsigned long maxSpace = 0;
 
-  maxSpace = ((unsigned long)1 << ((trial_key_length - key_data_len)*8))-1;
+  maxSpace = ((unsigned long)1 << ((MAX_KEY_LENGTH - key_data_len)*8))-1;
 
   printf("Max space: %lu\n", maxSpace);
 
-  for(unsigned long c=0; c < maxSpace ; c++){
+  if(make_trivial_ring() < 0) {
+    perror("Could not make trivial ring");
+    exit(EXIT_FAILURE);
+  }
 
-    unsigned long trialLowBits = keyLowBits | c;
+  int nodeid, childpid;
+  for (nodeid = 1; nodeid < numnodes; nodeid++) {
 
-    for (int i = 0; i < missingBytes; i++) {
-      int index = MAX_KEY_LENGTH - i - 1;
-      //printf("Key bump index: %d\n", index);
-      char bumpChar = (unsigned char) (trialLowBits >> i * 8);
-      //printf("Key bump char: %c\n", bumpChar);
-      trialkey[MAX_KEY_LENGTH - i - 1] = (unsigned char) (trialLowBits >> (i * 8));
+    if(add_new_node(&childpid) < 0){
+      perror("Could not add new node to ring");
+      exit(EXIT_FAILURE);
     }
 
-    
+    if (childpid) {
+     break;
+    }
 
-    //exit(-1);
+  }
 
-  	EVP_CIPHER_CTX en, de;
+  fprintf(stderr, "Init: node %d of %d\n", nodeid, numnodes);
 
-  	if (aes_init(trialkey, trial_key_length, &en, &de)) {
-    	   printf("Couldn't initialize AES cipher\n");
-    	   return -1;
-  	}
+  if (nodeid == 1) {
+    char buffer[MAX_BUFFER];
+    //fprintf(stderr, "Master initialized\n");
+    write(STDOUT_FILENO, "", MAX_BUFFER);
+    if (try_solve(key, MAX_KEY_LENGTH, cipher_in, cipher_length, plain_in, missingBytes, 0, keyLowBits) > 0) {
+      exit(1); // success
+    }
+    unsigned long seed = (unsigned long)nodeid;
+    while (seed <= maxSpace) {
 
-  	char *plaintext = (char *)aes_decrypt(&de, (unsigned char *)cipher_in,
-      &cipher_length);
+      if (seed % 10000 == 0)
+      fprintf(stderr, "Attempting seed: %lu\n", seed);
 
-    EVP_CIPHER_CTX_cleanup(&en);
-    EVP_CIPHER_CTX_cleanup(&de);
-
-    int y;
-
-    if (!strncmp(plaintext, plain_in, 28)) {
-
-  		printf("\nOK: enc/dec ok for \"%s\"\n", plaintext);
-  		printf("Key No.:%lu:", c);
-
-  		for(y = 0; y < MAX_KEY_LENGTH; y++) {
-        printf("%c", trialkey[y]);
+      //fprintf(stderr, "Master writing\n");
+      write(STDOUT_FILENO, "", MAX_BUFFER);
+      if (try_solve(key, MAX_KEY_LENGTH, cipher_in, cipher_length, plain_in, missingBytes, seed, keyLowBits) > 0) {
+        exit(1); // success
       }
-
-      printf("\n");
-
-      break;
-
-		} else {
-
-
-
+      //fprintf(stderr, "Master waiting to read\n");
+      read(STDIN_FILENO, buffer, MAX_BUFFER);
+      seed += (unsigned long)nodeid;
     }
-
-
-
+  } else {
+    unsigned long seed = (unsigned long)nodeid;
+    while (seed <= maxSpace) {
+      char buffer[MAX_BUFFER];
+      //fprintf(stderr, "Slave %d waiting to read\n", nodeid);
+      read(STDIN_FILENO, buffer, MAX_BUFFER);
+      //fprintf(stderr, "Slave read from %d\n", nodeid, nodeid-1);
+      //fprintf(stderr, "Slave %d asking next node to start.\n", nodeid);
+      write(STDOUT_FILENO, "", MAX_BUFFER);
+      if (try_solve(key, MAX_KEY_LENGTH, cipher_in, cipher_length, plain_in, missingBytes, seed, keyLowBits) > 0) {
+       exit(1); // success
+      }
+      seed += (unsigned long)nodeid;
+    }
   }
 
 }
