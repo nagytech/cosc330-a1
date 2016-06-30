@@ -146,12 +146,13 @@ int main(int argc, char **argv)
 
   	if (aes_init(trialkey, trial_key_length, &en, &de)) {
     	   printf("Couldn't initialize AES cipher\n");
-         free(plaintext); // TODO: Check this is necessary
     	   return -1;
   	}
 
   	plaintext = (char *)aes_decrypt(&de, (unsigned char *)cipher_in,
       &cipher_length);
+
+    // TODO: Possible memory leak if an error happens here.
 
     EVP_CIPHER_CTX_cleanup(&en);
     EVP_CIPHER_CTX_cleanup(&de);

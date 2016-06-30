@@ -94,4 +94,6 @@ int main(int argc, char **argv) {
 
 		printf("Plaintext: %s \n\n", plaintext);
 
+    free(plaintext);
+
 }

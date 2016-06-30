@@ -61,11 +61,18 @@ unsigned char *aes_encrypt(EVP_CIPHER_CTX *e, unsigned char *plaintext,
   EVP_EncryptFinal_ex(e, ciphertext+c_len, &f_len);
 
   *len = c_len + f_len;
+
   return ciphertext;
+
 }
 
 
 int main(int argc, char **argv){
+
+    if (argc != 2) {
+      fprintf(stderr, "Invalid number of arguments supplied.\nUsage: generate_ciphertext [string].\n");
+      return -1;
+    }
 
     /* "opaque" encryption, decryption ctx structures that libcrypto uses to
     record status of enc/dec operations */
@@ -107,6 +114,8 @@ int main(int argc, char **argv){
 
     ciphertext = aes_encrypt(&en, (unsigned char *)plainText, &len);
 
+    // TODO: Possible memory leak if error happens here.
+
     // print cipher bytes to stdout
     int cipher_length = strlen((char*)ciphertext);
     int cp=0;
@@ -114,6 +123,8 @@ int main(int argc, char **argv){
     for(cp = 0; cp < cipher_length; cp++){
     	printf("%c", ciphertext[cp]);
     }
+
+    free(ciphertext);
 
     return 0;
 
