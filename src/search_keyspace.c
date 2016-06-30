@@ -275,7 +275,7 @@ int main(int argc, char **argv)
   if (nodeid == 1) {
     char buffer[MAX_BUFFER];
     //fprintf(stderr, "Master initialized\n");
-    write(STDOUT_FILENO, "", MAX_BUFFER);
+    //write(STDOUT_FILENO, "", MAX_BUFFER);
     if (try_solve(key, MAX_KEY_LENGTH, cipher_in, cipher_length, plain_in, missingBytes, 0, keyLowBits) > 0) {
       exit(1); // success
     }
@@ -286,7 +286,7 @@ int main(int argc, char **argv)
      //fprintf(stderr, "Attempting seed: %lu\n", seed);
 
       //fprintf(stderr, "Master writing\n");
-      write(STDOUT_FILENO, "", MAX_BUFFER);
+      //write(STDOUT_FILENO, "ok", MAX_BUFFER);
       for (int i = 0; i < 50; i++) {
         if (try_solve(key, MAX_KEY_LENGTH, cipher_in, cipher_length, plain_in, missingBytes, seed, keyLowBits) > 0) {
          exit(1); // success
@@ -294,7 +294,7 @@ int main(int argc, char **argv)
         seed += (unsigned long)numnodes;
       }
       //fprintf(stderr, "Master waiting to read\n");
-      read(STDIN_FILENO, buffer, MAX_BUFFER);
+      //read(STDIN_FILENO, buffer, MAX_BUFFER);
     }
   } else {
     unsigned long seed = nodeid;
@@ -304,14 +304,14 @@ int main(int argc, char **argv)
 
       //fprintf(stderr, "Slave read from %d\n", nodeid, nodeid-1);
       //fprintf(stderr, "Slave %d asking next node to start.\n", nodeid);
-      write(STDOUT_FILENO, "", MAX_BUFFER);
+     // write(STDOUT_FILENO, "ok", MAX_BUFFER);
       for (int i = 0; i < 50; i++) {
         if (try_solve(key, MAX_KEY_LENGTH, cipher_in, cipher_length, plain_in, missingBytes, seed, keyLowBits) > 0) {
          exit(1); // success
         }
         seed += numnodes;
       }
-      read(STDIN_FILENO, buffer, MAX_BUFFER);
+      //read(STDIN_FILENO, buffer, MAX_BUFFER);
 
     }
   }
