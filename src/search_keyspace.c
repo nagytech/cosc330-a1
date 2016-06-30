@@ -146,7 +146,7 @@ int try_solve(char *keybase, int key_length, char *cipher_in, int cipher_length,
   for (int i = 0; i < missingBytes; i++) {
     int index = MAX_KEY_LENGTH - i - 1;
     //printf("Key bump index: %d\n", index);
-    char bumpChar = (unsigned char) (trialLowBits >> i * 8);
+    char bumpChar = (unsigned char) (trialLowBits >> (i * 8));
     //printf("Key bump char: %c\n", bumpChar);
     trialkey[MAX_KEY_LENGTH - i - 1] = (unsigned char) (trialLowBits >> (i * 8));
   }
@@ -172,15 +172,15 @@ int try_solve(char *keybase, int key_length, char *cipher_in, int cipher_length,
   EVP_CIPHER_CTX_cleanup(&de);
 
   // TODO: compare length, then compare length of plain in (iff equal length)
-  if (!strncmp(plaintext, plain_in, 32)) {
+  if (!strncmp(plaintext, plain_in, 10)) {
 
-		printf("\nOK: enc/dec ok for \"%s\"\n", plaintext);
-		printf("Key No.:%lu:", seed);
+		fprintf(stderr, "\nOK: enc/dec ok for \"%s\"\n", plaintext);
+		fprintf(stderr, "Key No.:%lu:", seed);
 
 		for(int y = 0; y < MAX_KEY_LENGTH; y++) {
-      printf("%c", trialkey[y]);
+      fprintf(stderr, "%c", trialkey[y]);
     }
-    printf("\n");
+    fprintf(stderr, "\n");
 
     // TODO: Write out the thingy
 
@@ -282,31 +282,37 @@ int main(int argc, char **argv)
     unsigned long seed = (unsigned long)nodeid;
     while (seed <= maxSpace) {
 
-      if (seed % 10000 == 0)
+      if (seed % 10000 < numnodes)
       fprintf(stderr, "Attempting seed: %lu\n", seed);
 
       //fprintf(stderr, "Master writing\n");
       write(STDOUT_FILENO, "", MAX_BUFFER);
-      if (try_solve(key, MAX_KEY_LENGTH, cipher_in, cipher_length, plain_in, missingBytes, seed, keyLowBits) > 0) {
-        exit(1); // success
-      }
+      //for (int i = 0; i < 100; i++) {
+        if (try_solve(key, MAX_KEY_LENGTH, cipher_in, cipher_length, plain_in, missingBytes, seed, keyLowBits) > 0) {
+         exit(1); // success
+        }
+        seed += (unsigned long)numnodes;
+      //}
       //fprintf(stderr, "Master waiting to read\n");
       read(STDIN_FILENO, buffer, MAX_BUFFER);
-      seed += (unsigned long)nodeid;
     }
   } else {
-    unsigned long seed = (unsigned long)nodeid;
+    unsigned long seed = nodeid;
     while (seed <= maxSpace) {
       char buffer[MAX_BUFFER];
       //fprintf(stderr, "Slave %d waiting to read\n", nodeid);
-      read(STDIN_FILENO, buffer, MAX_BUFFER);
+
       //fprintf(stderr, "Slave read from %d\n", nodeid, nodeid-1);
       //fprintf(stderr, "Slave %d asking next node to start.\n", nodeid);
       write(STDOUT_FILENO, "", MAX_BUFFER);
-      if (try_solve(key, MAX_KEY_LENGTH, cipher_in, cipher_length, plain_in, missingBytes, seed, keyLowBits) > 0) {
-       exit(1); // success
-      }
-      seed += (unsigned long)nodeid;
+      //for (int i = 0; i < 100; i++) {
+        if (try_solve(key, MAX_KEY_LENGTH, cipher_in, cipher_length, plain_in, missingBytes, seed, keyLowBits) > 0) {
+         exit(1); // success
+        }
+        seed += numnodes;
+      //}
+      read(STDIN_FILENO, buffer, MAX_BUFFER);
+
     }
   }
 
