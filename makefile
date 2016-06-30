@@ -7,9 +7,10 @@ INCLUDES =
 CFLAGS = -Wall -pedantic
 LIBS = -lcrypto
 
-EXES = decrypt_ciphertext generate_ciphertext search_keyspace
+EXES = decrypt_ciphertext generate_ciphertext search_keyspace search_multi
 
 all: ${EXES}
+
 
 decrypt_ciphertext: src/decrypt_ciphertext.c
 	${COMPILER} ${INCLUDES} ${CFLAGS} -o decrypt_ciphertext src/decrypt_ciphertext.c ${LIBS}
@@ -19,6 +20,10 @@ generate_ciphertext:	src/generate_ciphertext.c
 
 search_keyspace:	src/search_keyspace.c
 	${COMPILER} ${INCLUDES} ${CFLAGS} -o search_keyspace src/search_keyspace.c ${LIBS}
+
+search_multi:	src/search_multi.c
+	${COMPILER} ${INCLUDES} ${CFLAGS} -o search_multi src/search_multi.c ${LIBS}
+
 
 clean:
 	rm -f *~ *.o ${EXES}

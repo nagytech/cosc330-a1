@@ -4,14 +4,17 @@
 #include <openssl/evp.h>
 #include <openssl/aes.h>
 
+#define MAX_KEY_LENGTH 32
+#define CIPHER_LENGTH 32
+
 /*
  * Decrypt *len bytes of ciphertext
  */
 unsigned char *aes_decrypt(EVP_CIPHER_CTX *e, unsigned char *ciphertext, int *len)
 {
-  // plaintext will always be equal to or lesser than length of ciphertext
   int p_len = *len;
   int f_len = 0;
+
   unsigned char *plaintext = malloc(p_len);
 
   EVP_DecryptInit_ex(e, NULL, NULL, NULL, NULL);
@@ -24,10 +27,10 @@ unsigned char *aes_decrypt(EVP_CIPHER_CTX *e, unsigned char *ciphertext, int *le
 int aes_init(unsigned char *key_data, int key_data_len, EVP_CIPHER_CTX *e_ctx, EVP_CIPHER_CTX *d_ctx){
 
   int i;
-  unsigned char key[32], iv[32];
+  unsigned char key[MAX_KEY_LENGTH], iv[MAX_KEY_LENGTH];
 
   // Only use most significant 32 bytes of data if > 32 bytes
-  if(key_data_len > 32) key_data_len =32;
+  if(key_data_len > MAX_KEY_LENGTH) key_data_len = MAX_KEY_LENGTH;
 
   // Copy bytes to the front of the key array
   for (i = 0; i < key_data_len; i++){
@@ -35,7 +38,7 @@ int aes_init(unsigned char *key_data, int key_data_len, EVP_CIPHER_CTX *e_ctx, E
      iv[i] = key_data[i];
   }
 
-  for (i = key_data_len; i < 32; i++){
+  for (i = key_data_len; i < MAX_KEY_LENGTH; i++){
      key[i] = 0;
      iv[i] = 0;
   }
@@ -49,98 +52,124 @@ int aes_init(unsigned char *key_data, int key_data_len, EVP_CIPHER_CTX *e_ctx, E
 
 }
 
+void bump_key(unsigned char* trialkey, unsigned long keyLowBits, int iteration, int missingBytes) {
+
+  unsigned long trialLowBits = keyLowBits | iteration;
+
+  for (int i = 0; i < missingBytes; i++) {
+    int index = MAX_KEY_LENGTH - i - 1;
+    printf("Key bump index: %d\n", index);
+    char bumpChar = (unsigned char) (trialLowBits >> i * 8);
+    printf("Key bump char: %c\n", index);
+    trialkey[MAX_KEY_LENGTH - i - 1] = (unsigned char) (trialLowBits >> (i * 8));
+  }
+
+}
+
+void read_file(char *name, void *buffer, int length) {
+
+  FILE *file;
+  file=fopen(name, "r");
+
+  if (file == NULL) {
+   fprintf(stderr, "Could not open file: %s", name);
+   exit(EXIT_FAILURE);
+  }
+
+  fread(buffer, length, 1, file);
+  fclose(file);
+
+}
+
+int parse_args(int argc, char **argv, int *numprocs, unsigned char **key_data, int *key_data_len) {
+
+    *numprocs = atoi(argv[1]);
+    *key_data = (unsigned char *)argv[2];
+    *key_data_len = strlen(argv[2]);
+    if(*key_data_len > MAX_KEY_LENGTH) {
+      *key_data_len = MAX_KEY_LENGTH;
+    }
+
+    return 1;
+
+}
+
 int main(int argc, char **argv)
 {
+  /* Parse arguments */
+  int numprocs, key_data_len;
   unsigned char *key_data;
-  int  key_data_len, i;
-  char *plaintext;
 
-  key_data = (unsigned char *)argv[1];
-  key_data_len = strlen(argv[1]);
-
-
-  unsigned char key[32], iv[32];
-  unsigned char trialkey[32];
-
-  int cipher_length = 32;
-  FILE *mycipherfile;
-  mycipherfile=fopen("./data/cipher.txt","r");
-  if (mycipherfile == NULL) {
-  	printf("Could not open file ./data/cipher.txt");
-  	return -1;
+  if (parse_args(argc, argv, &numprocs, &key_data, &key_data_len) < 0) {
+    exit(-1);
   }
+
+  printf("STARTKEY[[");
+  for(int y = 0; y < key_data_len; y++) {
+    printf("%c", key_data[y]);
+  }
+  printf("]]ENDKEY\n");
+
+  printf("Key Data Length: %d\n", key_data_len);
+
+  /* Perform some auxiliary calculations */
+  int missingBytes = MAX_KEY_LENGTH - key_data_len;
+  printf("Missing Bytes: %d\n", missingBytes);
+
+  /* Read in files */
+
   unsigned char cipher_in[4096];
-  fread(cipher_in, cipher_length, 1, mycipherfile);
+  read_file("./data/cipher.txt", &cipher_in, 4096);
+  int cipher_length = strlen((char*)cipher_in);
 
-  FILE *myplainfile;
-  myplainfile=fopen("./data/plain.txt","r");
-  if (myplainfile == NULL) {
-  	printf("Could not open file ./data/plain.txt");
-  	return -1;
-  }
   char plain_in[4096];
-  fread(plain_in, 28, 1, myplainfile);
+  read_file("./data/plain.txt", &plain_in, 4096);
+  int plain_length = strlen((char*)plain_in);
 
-  int y;
-  printf("\nPlain:");
-  for(y=0;y<28;y++){
-          printf("%c",plain_in[y]);
-  }
-  printf("\n");
-  printf("\nCipher:");
-  for(y=0;y<32;y++){
-          printf("%c",cipher_in[y]);
-  }
-  //Only use most significant 32 bytes of data if > 32 bytes
-  if(key_data_len > 32) key_data_len =32;
+  /* Copy key and pad with zeros */
 
-  //Copy bytes to the front of the key array
-  for (i=0;i<key_data_len; i++){
+  unsigned char key[MAX_KEY_LENGTH], trialkey[MAX_KEY_LENGTH];
 
+  for (int i = 0; i < key_data_len; i++) {
    key[i] = key_data[i];
-   iv[i] = key_data[i];
    trialkey[i] = key_data[i];
   }
 
-  //If the key data < 32 bytes, pad the remaining bytes with 0s
-  //int key_diff = 32 - key_data_len;
-
-  for (i=key_data_len;i<32;i++){
+  for (int i = key_data_len; i < MAX_KEY_LENGTH; i++){
    key[i] = 0;
-   iv[i] = 0;
    trialkey[i] = 0;
   }
 
+
   unsigned long keyLowBits = 0;
-  keyLowBits = ((unsigned long)(key[24] & 0xFFFF)<< 56)|
-  	((unsigned long)(key[25] & 0xFFFF)<< 48)|
-  	((unsigned long)(key[26] & 0xFFFF)<< 40)|
-  	((unsigned long)(key[27] & 0xFFFF)<< 32)|
-  	((unsigned long)(key[28] & 0xFFFF)<< 24)|
-  	((unsigned long)(key[29] & 0xFFFF)<< 16)|
+
+  // TODO: Iterate dynamically
+  keyLowBits = ((unsigned long)((unsigned long)(key[29] & 0xFFFF)<< 16)|
   	((unsigned long)(key[30] & 0xFFFF)<< 8)|
-  	((unsigned long)(key[31] & 0xFFFF));
+  	((unsigned long)(key[31] & 0xFFFF)));
 
-
-
-  int trial_key_length=32;
-  unsigned long  maxSpace = 0;
-
+  int trial_key_length = MAX_KEY_LENGTH;
+  unsigned long maxSpace = 0;
 
   maxSpace = ((unsigned long)1 << ((trial_key_length - key_data_len)*8))-1;
 
-  unsigned long c;
-  for(c=0; i < maxSpace ; c++){
+  printf("Max space: %lu\n", maxSpace);
+
+  for(unsigned long c=0; c < maxSpace ; c++){
 
     unsigned long trialLowBits = keyLowBits | c;
 
-    trialkey[25] = (unsigned char) (trialLowBits >> 48);
-    trialkey[26] = (unsigned char) (trialLowBits >> 40);
-    trialkey[27] = (unsigned char) (trialLowBits >> 32);
-    trialkey[28] = (unsigned char) (trialLowBits >> 24);
-    trialkey[29] = (unsigned char) (trialLowBits >> 16);
-    trialkey[30] = (unsigned char) (trialLowBits >> 8);
-    trialkey[31] = (unsigned char) (trialLowBits);
+    for (int i = 0; i < missingBytes; i++) {
+      int index = MAX_KEY_LENGTH - i - 1;
+      //printf("Key bump index: %d\n", index);
+      char bumpChar = (unsigned char) (trialLowBits >> i * 8);
+      //printf("Key bump char: %c\n", bumpChar);
+      trialkey[MAX_KEY_LENGTH - i - 1] = (unsigned char) (trialLowBits >> (i * 8));
+    }
+
+    
+
+    //exit(-1);
 
   	EVP_CIPHER_CTX en, de;
 
@@ -149,10 +178,8 @@ int main(int argc, char **argv)
     	   return -1;
   	}
 
-  	plaintext = (char *)aes_decrypt(&de, (unsigned char *)cipher_in,
+  	char *plaintext = (char *)aes_decrypt(&de, (unsigned char *)cipher_in,
       &cipher_length);
-
-    // TODO: Possible memory leak if an error happens here.
 
     EVP_CIPHER_CTX_cleanup(&en);
     EVP_CIPHER_CTX_cleanup(&de);
@@ -162,19 +189,23 @@ int main(int argc, char **argv)
     if (!strncmp(plaintext, plain_in, 28)) {
 
   		printf("\nOK: enc/dec ok for \"%s\"\n", plaintext);
-  		printf("Key No.:%zu:", c);
+  		printf("Key No.:%lu:", c);
 
-  		for(y = 0; y < 32; y++) {
-        printf("%c",trialkey[y]);
+  		for(y = 0; y < MAX_KEY_LENGTH; y++) {
+        printf("%c", trialkey[y]);
       }
 
       printf("\n");
 
       break;
 
-		}
+		} else {
 
-    free(plaintext);
+
+
+    }
+
+
 
   }
 
