@@ -105,7 +105,7 @@ void read_file(char *name, void *buffer, int length) {
   file=fopen(name, "r");
 
   if (file == NULL) {
-   fprintf(stderr, "Could not open file: %s", name);
+   //fprintf(stderr, "Could not open file: %s", name);
    exit(EXIT_FAILURE);
   }
 
@@ -174,13 +174,13 @@ int try_solve(char *keybase, int key_length, char *cipher_in, int cipher_length,
   // TODO: compare length, then compare length of plain in (iff equal length)
   if (!strncmp(plaintext, plain_in, 10)) {
 
-		fprintf(stderr, "\nOK: enc/dec ok for \"%s\"\n", plaintext);
-		fprintf(stderr, "Key No.:%lu:", seed);
+	fprintf(stderr, "\nOK: enc/dec ok for \"%s\"\n", plaintext);
+	fprintf(stderr, "Key No.:%lu:", seed);
 
 		for(int y = 0; y < MAX_KEY_LENGTH; y++) {
-      fprintf(stderr, "%c", trialkey[y]);
+     fprintf(stderr, "%c", trialkey[y]);
     }
-    fprintf(stderr, "\n");
+   fprintf(stderr, "\n");
 
     // TODO: Write out the thingy
 
@@ -270,7 +270,7 @@ int main(int argc, char **argv)
 
   }
 
-  fprintf(stderr, "Init: node %d of %d\n", nodeid, numnodes);
+ //fprintf(stderr, "Init: node %d of %d\n", nodeid, numnodes);
 
   if (nodeid == 1) {
     char buffer[MAX_BUFFER];
@@ -282,17 +282,17 @@ int main(int argc, char **argv)
     unsigned long seed = (unsigned long)nodeid;
     while (seed <= maxSpace) {
 
-      if (seed % 10000 < numnodes)
-      fprintf(stderr, "Attempting seed: %lu\n", seed);
+      //if (seed % 10000 < numnodes)
+     //fprintf(stderr, "Attempting seed: %lu\n", seed);
 
       //fprintf(stderr, "Master writing\n");
       write(STDOUT_FILENO, "", MAX_BUFFER);
-      //for (int i = 0; i < 100; i++) {
+      for (int i = 0; i < 50; i++) {
         if (try_solve(key, MAX_KEY_LENGTH, cipher_in, cipher_length, plain_in, missingBytes, seed, keyLowBits) > 0) {
          exit(1); // success
         }
         seed += (unsigned long)numnodes;
-      //}
+      }
       //fprintf(stderr, "Master waiting to read\n");
       read(STDIN_FILENO, buffer, MAX_BUFFER);
     }
@@ -305,12 +305,12 @@ int main(int argc, char **argv)
       //fprintf(stderr, "Slave read from %d\n", nodeid, nodeid-1);
       //fprintf(stderr, "Slave %d asking next node to start.\n", nodeid);
       write(STDOUT_FILENO, "", MAX_BUFFER);
-      //for (int i = 0; i < 100; i++) {
+      for (int i = 0; i < 50; i++) {
         if (try_solve(key, MAX_KEY_LENGTH, cipher_in, cipher_length, plain_in, missingBytes, seed, keyLowBits) > 0) {
          exit(1); // success
         }
         seed += numnodes;
-      //}
+      }
       read(STDIN_FILENO, buffer, MAX_BUFFER);
 
     }
