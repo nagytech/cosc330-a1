@@ -77,8 +77,8 @@ int aes_init(unsigned char *key_data, int key_data_len, EVP_CIPHER_CTX *e_ctx,
      iv[i] = 0;
   }
 
-  EVP_CIPHER_CTX_init(e_ctx);
-  EVP_EncryptInit_ex(e_ctx, EVP_aes_256_cbc(), NULL, key, iv);
+  //EVP_CIPHER_CTX_init(e_ctx);
+  //EVP_EncryptInit_ex(e_ctx, EVP_aes_256_cbc(), NULL, key, iv);
   EVP_CIPHER_CTX_init(d_ctx);
   EVP_DecryptInit_ex(d_ctx, EVP_aes_256_cbc(), NULL, key, iv);
 
@@ -160,7 +160,7 @@ int try_solve(char *keybase, int key_length, char *cipher_in, int cipher_length,
 
   //exit(-1);
 
-	EVP_CIPHER_CTX en, de;
+	EVP_CIPHER_CTX de;
 
 	if (aes_init(trialkey, trial_key_length, &en, &de)) {
   	   printf("Couldn't initialize AES cipher\n");
@@ -170,7 +170,7 @@ int try_solve(char *keybase, int key_length, char *cipher_in, int cipher_length,
 	char *plaintext = (char *)aes_decrypt(&de, (unsigned char *)cipher_in,
     &cipher_length);
 
-  EVP_CIPHER_CTX_cleanup(&en);
+  //EVP_CIPHER_CTX_cleanup(&en);
   EVP_CIPHER_CTX_cleanup(&de);
 
   // TODO: compare length, then compare length of plain in (iff equal length)
