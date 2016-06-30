@@ -4,7 +4,7 @@ INCLUDES =
   INCLUDES = -I/usr/local/Cellar/openssl/1.0.2a-1/include/ 
 #endif
 
-CFLAGS = -g -Wall -pedantic
+CFLAGS = -g -pg -Wall -pedantic
 LIBS = -lcrypto
 
 EXES = decrypt_ciphertext generate_ciphertext search_keyspace search_multi

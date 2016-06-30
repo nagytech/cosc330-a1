@@ -28,6 +28,8 @@ int add_new_node(int *pid){
     return(-1);
   if ((*pid = fork()) == -1)
     return(-2);
+  extern void _start (void), etext (void);
+  monstartup ((u_long) &_start, (u_long) &etext);
   if(*pid > 0 && dup2(fd[1], STDOUT_FILENO) < 0)
     return(-3);
   if (*pid == 0 && dup2(fd[0], STDIN_FILENO) < 0)
