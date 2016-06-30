@@ -10,7 +10,7 @@
 #define CIPHER_LENGTH 32
 #define MAX_BUFFER 4096
 
-int make_trivial_ring(){
+int make_trivial_ring() {
   int   fd[2];
   if (pipe (fd) == -1)
     return(-1);
@@ -150,6 +150,7 @@ int try_solve(char *keybase, int key_length, char *cipher_in, int cipher_length,
     //printf("Key bump char: %c\n", bumpChar);
     trialkey[MAX_KEY_LENGTH - i - 1] = (unsigned char) (trialLowBits >> (i * 8));
   }
+
   //printf("STARTKEY[[");
   //for(int y = 0; y < MAX_KEY_LENGTH; y++) {
   //  printf("%c", trialkey[y]);
@@ -218,12 +219,12 @@ int main(int argc, char **argv)
 
   /* Read in files */
 
-  unsigned char cipher_in[4096];
-  read_file("./data/cipher.txt", &cipher_in, 4096);
+  unsigned char cipher_in[MAX_BUFFER];
+  read_file("./data/cipher.txt", &cipher_in, MAX_BUFFER);
   int cipher_length = strlen((char*)cipher_in);
 
-  char plain_in[4096];
-  read_file("./data/plain.txt", &plain_in, 4096);
+  char plain_in[MAX_BUFFER];
+  read_file("./data/plain.txt", &plain_in, MAX_BUFFER);
   int plain_length = strlen((char*)plain_in);
 
   /* Copy key and pad with zeros */
@@ -240,10 +241,16 @@ int main(int argc, char **argv)
 
   unsigned long keyLowBits = 0;
 
+  for (int i = 0; i < missingBytes; i++) {
+    int index = MAX_KEY_LENGTH - (missingBytes - 1) - 1;
+    //printf("Key bump index: %d\n", index);
+    keyLowBits |= ((unsigned long)(key[index] & 0xFFFF) << (missingBytes - i) * 8);
+  }
+
   // TODO: Iterate dynamically
-  keyLowBits = ((unsigned long)((unsigned long)(key[29] & 0xFFFF)<< 16)|
-  	((unsigned long)(key[30] & 0xFFFF)<< 8)|
-  	((unsigned long)(key[31] & 0xFFFF)));
+  //keyLowBits = ((unsigned long)((unsigned long)(key[29] & 0xFFFF)<< 16)|
+  	//((unsigned long)(key[30] & 0xFFFF)<< 8)|
+  	//((unsigned long)(key[31] & 0xFFFF)));
 
   unsigned long maxSpace = 0;
 
@@ -300,19 +307,12 @@ int main(int argc, char **argv)
     unsigned long seed = nodeid;
     while (seed <= maxSpace) {
       char buffer[MAX_BUFFER];
-      //fprintf(stderr, "Slave %d waiting to read\n", nodeid);
-
-      //fprintf(stderr, "Slave read from %d\n", nodeid, nodeid-1);
-      //fprintf(stderr, "Slave %d asking next node to start.\n", nodeid);
-     // write(STDOUT_FILENO, "ok", MAX_BUFFER);
       for (int i = 0; i < 50; i++) {
         if (try_solve(key, MAX_KEY_LENGTH, cipher_in, cipher_length, plain_in, missingBytes, seed, keyLowBits) > 0) {
-         exit(1); // success
+          exit(1); // success
         }
         seed += numnodes;
       }
-      //read(STDIN_FILENO, buffer, MAX_BUFFER);
-
     }
   }
 
