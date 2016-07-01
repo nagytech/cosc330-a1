@@ -28,8 +28,10 @@ int add_new_node(int *pid){
     return(-1);
   if ((*pid = fork()) == -1)
     return(-2);
-  //extern void _start (void), etext (void);
-  //monstartup ((u_long) &_start, (u_long) &etext);
+  /*
+  extern void _start (void), etext (void);
+  monstartup ((unsigned long) &_start, (unsigned long) &etext);
+  */
   if(*pid > 0 && dup2(fd[1], STDOUT_FILENO) < 0)
     return(-3);
   if (*pid == 0 && dup2(fd[0], STDIN_FILENO) < 0)
@@ -93,9 +95,9 @@ void bump_key(unsigned char* trialkey, unsigned long keyLowBits, int iteration,
 
   for (int i = 0; i < missingBytes; i++) {
     int index = MAX_KEY_LENGTH - i - 1;
-    printf("Key bump index: %d\n", index);
+    //printf("Key bump index: %d\n", index);
     char bumpChar = (unsigned char) (trialLowBits >> i * 8);
-    printf("Key bump char: %c\n", index);
+    //printf("Key bump char: %c\n", index);
     trialkey[MAX_KEY_LENGTH - i - 1] = (unsigned char) (trialLowBits >> (i * 8));
   }
 
@@ -295,7 +297,7 @@ int main(int argc, char **argv)
 
       //fprintf(stderr, "Master writing\n");
       //write(STDOUT_FILENO, "ok", MAX_BUFFER);
-      for (int i = 0; i < 50; i++) {
+      for (int i = 0; i < 40; i++) {
         if (try_solve(key, MAX_KEY_LENGTH, cipher_in, cipher_length, plain_in, missingBytes, seed, keyLowBits) > 0) {
          exit(1); // success
         }
@@ -308,7 +310,7 @@ int main(int argc, char **argv)
     unsigned long seed = nodeid;
     while (seed <= maxSpace) {
       char buffer[MAX_BUFFER];
-      for (int i = 0; i < 50; i++) {
+      for (int i = 0; i < 40; i++) {
         if (try_solve(key, MAX_KEY_LENGTH, cipher_in, cipher_length, plain_in, missingBytes, seed, keyLowBits) > 0) {
           exit(1); // success
         }
