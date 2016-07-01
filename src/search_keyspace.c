@@ -28,8 +28,8 @@ int add_new_node(int *pid){
     return(-1);
   if ((*pid = fork()) == -1)
     return(-2);
-  extern void _start (void), etext (void);
-  monstartup ((u_long) &_start, (u_long) &etext);
+  //extern void _start (void), etext (void);
+  //monstartup ((u_long) &_start, (u_long) &etext);
   if(*pid > 0 && dup2(fd[1], STDOUT_FILENO) < 0)
     return(-3);
   if (*pid == 0 && dup2(fd[0], STDIN_FILENO) < 0)
@@ -57,7 +57,7 @@ unsigned char *aes_decrypt(EVP_CIPHER_CTX *e, unsigned char *ciphertext,
   return plaintext;
 }
 
-int aes_init(unsigned char *key_data, int key_data_len, EVP_CIPHER_CTX *e_ctx,
+int aes_init(unsigned char *key_data, int key_data_len,
   EVP_CIPHER_CTX *d_ctx){
 
   int i;
@@ -163,7 +163,7 @@ int try_solve(char *keybase, int key_length, char *cipher_in, int cipher_length,
 
 	EVP_CIPHER_CTX de;
 
-	if (aes_init(trialkey, trial_key_length, &en, &de)) {
+	if (aes_init(trialkey, trial_key_length, &de)) {
   	   printf("Couldn't initialize AES cipher\n");
   	   return -1;
 	}
@@ -171,7 +171,6 @@ int try_solve(char *keybase, int key_length, char *cipher_in, int cipher_length,
 	char *plaintext = (char *)aes_decrypt(&de, (unsigned char *)cipher_in,
     &cipher_length);
 
-  //EVP_CIPHER_CTX_cleanup(&en);
   EVP_CIPHER_CTX_cleanup(&de);
 
   // TODO: compare length, then compare length of plain in (iff equal length)
