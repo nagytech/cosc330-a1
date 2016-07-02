@@ -11,7 +11,7 @@
 
 #define CIPHER_PATH "./data/cipher.txt"
 #define FOPEN_READONLY "r"
-#define FOPEN_ERROR "Could not open file: %s"
+#define FOPEN_ERROR "Could not open file: %s\n"
 #define MAX_BUFFER 1024
 #define MAX_KEY_LENGTH 32
 #define PLAIN_TEXT_PATH "./data/plain.txt"
@@ -45,19 +45,6 @@ int read_file(char *name, unsigned char *buf, int len) {
   // Free resources
   fclose(f);
 
-#ifdef DEBUG
-
-  // Print out file contents
-  fprintf(stderr, "Read file %s as: ", name);
-  int cs = strlen(buf); // TODO: See 'binary' comment above
-  for(int y = 0; y < cs; y++) {
-   // TODO: If binary, only dump until EOF
-   fprintf(stderr, "%c", buf[y]);
-  }
-  fprintf(stderr, "\n");
-
-#endif
-
   return(read);
 
 }
@@ -82,10 +69,6 @@ int add_new_node(int* pid)
         return (-1);
     if ((*pid = fork()) == -1)
         return (-2);
-    /*
-     * extern void _start (void), etext (void); monstartup ((unsigned
-     * long) &_start, (unsigned long) &etext);
-     */
     if (*pid > 0 && dup2(fd[1], STDOUT_FILENO) < 0)
         return (-3);
     if (*pid == 0 && dup2(fd[0], STDIN_FILENO) < 0)
@@ -94,6 +77,8 @@ int add_new_node(int* pid)
         return (-5);
     return (0);
 }
+
+void copy_key(unsigned char *key, unsigned char *buf, int len);
 
 /*
  * Decrypt *len bytes of ciphertext
@@ -113,14 +98,10 @@ unsigned char *aes_decrypt(EVP_CIPHER_CTX* de, unsigned char* cin, int* clen)
     return ptxt;
 }
 
-int aes_init(unsigned char* key_data, int key_data_len, EVP_CIPHER_CTX* d_ctx)
+int aes_init(unsigned char* keyin, EVP_CIPHER_CTX* d_ctx)
 {
-
-    if (key_data_len > MAX_KEY_LENGTH)
-        key_data_len = MAX_KEY_LENGTH;
-
     EVP_CIPHER_CTX_init(d_ctx);
-    EVP_DecryptInit_ex(d_ctx, EVP_aes_256_cbc(), NULL, key_data, key_data);
+    EVP_DecryptInit_ex(d_ctx, EVP_aes_256_cbc(), NULL, keyin, keyin);
 
     return 0;
 }
@@ -142,7 +123,7 @@ int parse_args(int argc, char **argv, int *nnode, unsigned char *kd, int *kdl,
 
     // Validate number of arguments
     if (argc != 3) {
-      fprintf(stderr, "Usage: %s nodecount keydata", argv[0]);
+      fprintf(stderr, "Usage: %s nodecount keydata\n", argv[0]);
       return (-1);
     }
 
@@ -167,70 +148,15 @@ int parse_args(int argc, char **argv, int *nnode, unsigned char *kd, int *kdl,
     // Count missing bytes
     *ul = MAX(MAX_KEY_LENGTH - *kdl, 0);
     if (*ul > 4) {
-      fprintf(stderr, "Warning: processing %d bytes may take a while.", *kdl);
+      fprintf(stderr, "Warning: processing %d bytes may take a while.\n", *kdl);
     } else if (*ul == 0) {
-      fprintf(stderr, "Note: key length is greater than the max length (%d)",
+      fprintf(stderr, "Note: key length is not less than the max length: %d\n",
         MAX_KEY_LENGTH);
     }
 
     return 1;
 }
 
-int try_solve(char* keybase, int key_length, char* cipher_in,
-    int cipher_length, char* plain_in, int missingBytes,
-    unsigned long seed, unsigned long keyLowBits)
-{
-
-    unsigned char trialkey[MAX_KEY_LENGTH];
-    int trial_key_length = key_length;
-
-    for (int i = 0; i < key_length; i++) {
-        trialkey[i] = keybase[i];
-    }
-
-    unsigned long trialLowBits = keyLowBits | seed;
-
-    // TODO: gen trialkey once, then keep offsetting
-
-    for (int i = 0; i < missingBytes; i++) {
-        trialkey[MAX_KEY_LENGTH - i - 1] = (unsigned char)(trialLowBits >> (i * 8));
-    }
-
-    EVP_CIPHER_CTX de;
-
-    if (aes_init(trialkey, trial_key_length, &de)) {
-        printf("Couldn't initialize AES cipher\n");
-        return -1;
-    }
-
-    char* plaintext = (char*)aes_decrypt(&de, (unsigned char*)cipher_in,
-        &cipher_length);
-
-    EVP_CIPHER_CTX_cleanup(&de);
-
-    // TODO: compare length, then compare length of plain in (iff equal
-    // length)
-    if (!strncmp(plaintext, plain_in, 10)) {
-
-        fprintf(stderr, "\nOK: enc/dec ok for \"%s\"\n", plaintext);
-        fprintf(stderr, "Key No.:%lu:", seed);
-
-        for (int y = 0; y < MAX_KEY_LENGTH; y++) {
-            fprintf(stderr, "%c", trialkey[y]);
-        }
-        fprintf(stderr, "\n");
-
-        kill(0, SIGTERM);
-        exit(0);
-
-        return 1;
-    }
-    else {
-
-        // fprintf(stderr, "Seed %lu Failed\n", seed);
-        return -1;
-    }
-}
 
 /*
  * Function:  copy_key
@@ -254,27 +180,27 @@ int nodeid;
 void signal_handler(int signum)
 {
 
-    fprintf(stderr, "%d exiting", nodeid);
+    unsigned char buffer[MAX_KEY_LENGTH];
 
-    exit(0);
-    /*
-     * unsigned char buffer[33]; int le = 32;
-     *
-     * read(STDIN_FILENO, buffer, 32);
-     *
-     * if (nodeid == 1 && buffer[0] != '\0') {
-     *
-     * buffer[32] = '\0';
-     *
-     * for (int i = 0; i < 32; i++) { fprintf(stderr, "%c", buffer[i]); }
-     * fprintf(stderr, "\n");
-     *
-     * exit(0); }
-     *
-     * write(STDOUT_FILENO, buffer, 32);
-     *
-     * if (nodeid != 1) { exit(0); }
-     */
+    read(STDIN_FILENO, buffer, MAX_KEY_LENGTH);
+
+    if (nodeid == 1 && buffer[0] != '\0') {
+
+      for (int i = 0; i < 32; i++) {
+        fprintf(stderr, "%c", buffer[i]);
+      }
+      fprintf(stderr, "\n");
+
+      exit(0);
+
+    }
+
+    write(STDOUT_FILENO, buffer, MAX_KEY_LENGTH);
+
+    if (nodeid != 1) {
+      exit(0);
+    }
+
 }
 
 int main(int argc, char **argv)
@@ -295,18 +221,23 @@ int main(int argc, char **argv)
         exit(ec);
     }
 
-    // Read the cipher and plain text files into memory
+    // Allocate buffers for reading files
     unsigned char cin[MAX_BUFFER];
     char pin[MAX_BUFFER];
+
+    // Read cipher binary file into memory
     ec = read_file(CIPHER_PATH, (unsigned char *)&cin, MAX_BUFFER);
     if (ec < 0) {
         exit(ec);
     }
     int clen = strlen((char*)cin);
+
+    // Read plain text file into memory
     ec = read_file(PLAIN_TEXT_PATH, (unsigned char *)&pin, MAX_BUFFER);
     if (ec < 0) {
         exit(ec);
     }
+    int plen = strlen(pin);
 
     // Assign low bits for the unknown interval of the keyspace to the base key
     unsigned long klb = 0;
@@ -352,15 +283,17 @@ int main(int argc, char **argv)
     copy_key(keyin, tkey, MAX_KEY_LENGTH);
 
     for (;seed <= maxspc; seed += (unsigned long)nnodes) {
-
       bump_key((unsigned char *)tkey, klb, seed, ulen);
-      aes_init((unsigned char *)tkey, MAX_KEY_LENGTH, &de);
+      aes_init(tkey, &de);
       char *pout = (char *)aes_decrypt(&de, cin, &clen);
 
-      if (strncmp(pin, pout, clen) == 0) {
-        fprintf(stderr, "ok");
-        kill(0, SIGTERM);
+      if (!strncmp(pin, pout, plen - 1)) {
+        write(STDOUT_FILENO, tkey, MAX_KEY_LENGTH);
+        break;
       }
 
     }
+
+    kill(0, SIGTERM);
+
 }
