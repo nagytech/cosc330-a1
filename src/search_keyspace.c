@@ -109,9 +109,12 @@ unsigned char *aes_decrypt(EVP_CIPHER_CTX* de, unsigned char* cin, int* clen)
 
 int aes_init(unsigned char* keyin, EVP_CIPHER_CTX* d_ctx)
 {
-
-    EVP_DecryptInit_ex(d_ctx, EVP_aes_256_cbc(), NULL, keyin, keyin);
-
+    int ec = EVP_DecryptInit_ex(d_ctx, EVP_aes_256_cbc(), NULL, keyin, keyin);
+    if (ec < 1) {
+      perror("Failed to initialize EVP decryption");
+      // TODO: maybe return error code so the current thread can die gracefully
+      kill(0, SIGTERM);
+    }
     return 0;
 }
 
@@ -191,24 +194,35 @@ void signal_handler(int signum)
 
     unsigned char buffer[MAX_KEY_LENGTH];
 
+    // Block until something is written to STDIN
     read(STDIN_FILENO, buffer, MAX_KEY_LENGTH);
 
-    if (nodeid == 1 && buffer[0] != '\0') {
+    /* --- STDIN RECEIVED --- */
 
-      for (int i = 0; i < 32; i++) {
-        fprintf(stderr, "%c", buffer[i]);
-      }
-      fprintf(stderr, "\n");
+    // Check if the current node is a child
+    if (nodeid > 1) {
 
+      /* --- CHILD NODE --- */
+
+      // Child process which has already read data should write, then exit
+      write(STDOUT_FILENO, buffer, MAX_KEY_LENGTH);
       exit(0);
 
     }
 
-    write(STDOUT_FILENO, buffer, MAX_KEY_LENGTH);
+    /* --- MASTER NODE --- */
 
-    if (nodeid != 1) {
-      exit(0);
+    // Print out the buffer contents which will be the valid key
+    for (int i = 0; i < 32; i++) {
+      // Note: we iterate since the key is pure binary and may contain \0's
+      fprintf(stderr, "%c", buffer[i]);
     }
+    fprintf(stderr, "\n");
+
+    // TODO: Maybe try to encrypt with the key so we really know it's valid
+
+    // Terminate, which should cascade to any processes that have not already
+    exit(0);
 
 }
 
@@ -284,13 +298,14 @@ int main(int argc, char **argv)
     /* -------------------------------------------------------------------- */
 
     // Cipher context
-    EVP_CIPHER_CTX de;
+    EVP_CIPHER_CTX *de = EVP_CIPHER_CTX_new();
+    EVP_CIPHER_CTX_init(de);
 
     unsigned long seed = nodeid - 1;
     unsigned char tkey[MAX_KEY_LENGTH];
     copy_key(keyin, tkey, MAX_KEY_LENGTH);
 
-    EVP_CIPHER_CTX_init(&de);
+
 
     // Iterate through the node's keyspace
     for (;seed <= maxspc; seed += (unsigned long)nnodes) {
@@ -298,11 +313,9 @@ int main(int argc, char **argv)
       // Generate the next key in the sequence
       bump_key((unsigned char *)tkey, klb, seed, ulen);
 
-
-
       // Initizlise AES and perform decryption
-      aes_init(tkey, &de);
-      char *pout = (char *)aes_decrypt(&de, cin, &clen);
+      aes_init(tkey, de);
+      char *pout = (char *)aes_decrypt(de, cin, &clen);
 
       // Compare the decrypted plaintext against the input file contents
       if (!strncmp(pin, pout, plen - 1)) {
