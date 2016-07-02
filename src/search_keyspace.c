@@ -156,13 +156,12 @@ int parse_args(int argc, char **argv, int *nnode, unsigned char *kd, int *kdl,
     *kdl = MIN(strlen(argv[2]), MAX_KEY_LENGTH); // HACK: strlen fails on '\0'
 
     // Move key data to smaller memory space
-    unsigned char keyin[MAX_KEY_LENGTH];
     // Note: strncpy won't work in the case of binary data inclusive of '\0'
     for (int i = 0; i < *kdl; i++) {
-        keyin[i] = argv[2][i];
+        kd[i] = argv[2][i];
     }
     for (int i = *kdl; i < MAX_KEY_LENGTH; i++) {
-        keyin[i] = 0;
+        kd[i] = 0;
     }
 
     // Count missing bytes
@@ -291,7 +290,7 @@ int main(int argc, char **argv)
 
     // Parsed arguments
     int nnodes, kdl, ulen;
-    unsigned char *keyin = NULL;
+    unsigned char keyin[MAX_KEY_LENGTH];
     if ((ec = parse_args(argc, argv, &nnodes, keyin, &kdl, &ulen)) < 0) {
         exit(ec);
     }
