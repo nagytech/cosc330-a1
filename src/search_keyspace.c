@@ -52,7 +52,6 @@ unsigned char *aes_decrypt(EVP_CIPHER_CTX *e, unsigned char *ciphertext,
 
   unsigned char *plaintext = malloc(p_len);
 
-  EVP_DecryptInit_ex(e, NULL, NULL, NULL, NULL);
   EVP_DecryptUpdate(e, plaintext, &p_len, ciphertext, *len);
   EVP_DecryptFinal_ex(e, plaintext + p_len, &f_len);
 
@@ -63,26 +62,12 @@ int aes_init(unsigned char *key_data, int key_data_len,
   EVP_CIPHER_CTX *d_ctx){
 
   int i;
-  unsigned char key[MAX_KEY_LENGTH], iv[MAX_KEY_LENGTH];
+  unsigned char key[MAX_KEY_LENGTH];
 
-  // Only use most significant 32 bytes of data if > 32 bytes
   if(key_data_len > MAX_KEY_LENGTH) key_data_len = MAX_KEY_LENGTH;
 
-  // Copy bytes to the front of the key array
-  for (i = 0; i < key_data_len; i++){
-     key[i] = key_data[i];
-     iv[i] = key_data[i];
-  }
-
-  for (i = key_data_len; i < MAX_KEY_LENGTH; i++){
-     key[i] = 0;
-     iv[i] = 0;
-  }
-
-  //EVP_CIPHER_CTX_init(e_ctx);
-  //EVP_EncryptInit_ex(e_ctx, EVP_aes_256_cbc(), NULL, key, iv);
   EVP_CIPHER_CTX_init(d_ctx);
-  EVP_DecryptInit_ex(d_ctx, EVP_aes_256_cbc(), NULL, key, iv);
+  EVP_DecryptInit_ex(d_ctx, EVP_aes_256_cbc(), NULL, key_data, key_data);
 
   return 0;
 
@@ -155,14 +140,6 @@ int try_solve(char *keybase, int key_length, char *cipher_in, int cipher_length,
     trialkey[MAX_KEY_LENGTH - i - 1] = (unsigned char) (trialLowBits >> (i * 8));
   }
 
-  //printf("STARTKEY[[");
-  //for(int y = 0; y < MAX_KEY_LENGTH; y++) {
-  //  printf("%c", trialkey[y]);
-  //}
-  //printf("]]ENDKEY\n");
-
-  //exit(-1);
-
 	EVP_CIPHER_CTX de;
 
 	if (aes_init(trialkey, trial_key_length, &de)) {
@@ -186,7 +163,8 @@ int try_solve(char *keybase, int key_length, char *cipher_in, int cipher_length,
     }
    fprintf(stderr, "\n");
 
-    // TODO: Write out the thingy
+    kill(0, SIGTERM);
+    exit(0);
 
     return 1;
 
@@ -198,8 +176,44 @@ int try_solve(char *keybase, int key_length, char *cipher_in, int cipher_length,
   }
 }
 
+int signal_handler(int signum) {
+
+   fprintf(stderr, "%d exiting", nodeid);
+
+   exit(0);
+/*
+  unsigned char buffer[33];
+  int le = 32;
+
+  read(STDIN_FILENO, buffer, 32);
+
+  if (nodeid == 1 && buffer[0] != '\0') {
+
+    buffer[32] = '\0';
+
+    for (int i = 0; i < 32; i++) {
+      fprintf(stderr, "%c", buffer[i]);
+    }
+    fprintf(stderr, "\n");
+
+    exit(0);
+  }
+
+  write(STDOUT_FILENO, buffer, 32);
+
+  if (nodeid != 1) {
+    exit(0);
+  }
+*/
+
+}
+
+int nodeid;
 int main(int argc, char **argv)
 {
+
+  signal(SIGTERM, signal_handler); 
+
   /* Parse arguments */
   int numnodes, key_data_len;
   unsigned char *key_data;
@@ -266,7 +280,7 @@ int main(int argc, char **argv)
     exit(EXIT_FAILURE);
   }
 
-  int nodeid, childpid;
+  int childpid;
   for (nodeid = 1; nodeid < numnodes; nodeid++) {
 
     if(add_new_node(&childpid) < 0){
@@ -287,7 +301,7 @@ int main(int argc, char **argv)
     //fprintf(stderr, "Master initialized\n");
     //write(STDOUT_FILENO, "", MAX_BUFFER);
     if (try_solve(key, MAX_KEY_LENGTH, cipher_in, cipher_length, plain_in, missingBytes, 0, keyLowBits) > 0) {
-      exit(1); // success
+      exit(0);
     }
     unsigned long seed = (unsigned long)nodeid;
     while (seed <= maxSpace) {
@@ -297,12 +311,11 @@ int main(int argc, char **argv)
 
       //fprintf(stderr, "Master writing\n");
       //write(STDOUT_FILENO, "ok", MAX_BUFFER);
-      for (int i = 0; i < 40; i++) {
         if (try_solve(key, MAX_KEY_LENGTH, cipher_in, cipher_length, plain_in, missingBytes, seed, keyLowBits) > 0) {
-         exit(1); // success
+         kill(0, SIGTERM);
+         break;
         }
         seed += (unsigned long)numnodes;
-      }
       //fprintf(stderr, "Master waiting to read\n");
       //read(STDIN_FILENO, buffer, MAX_BUFFER);
     }
@@ -310,13 +323,12 @@ int main(int argc, char **argv)
     unsigned long seed = nodeid;
     while (seed <= maxSpace) {
       char buffer[MAX_BUFFER];
-      for (int i = 0; i < 40; i++) {
         if (try_solve(key, MAX_KEY_LENGTH, cipher_in, cipher_length, plain_in, missingBytes, seed, keyLowBits) > 0) {
-          exit(1); // success
+	  kill(0, SIGTERM);
+     break;
         }
         seed += numnodes;
       }
-    }
   }
 
 }
