@@ -98,18 +98,19 @@ int add_new_node(int* pid)
 /*
  * Decrypt *len bytes of ciphertext
  */
-unsigned char*
-aes_decrypt(EVP_CIPHER_CTX* e, unsigned char* ciphertext, int* len)
+unsigned char *aes_decrypt(EVP_CIPHER_CTX* de, unsigned char* cin, int* clen)
 {
-    int p_len = *len;
-    int f_len = 0;
+    int plen = *clen;
+    int flen = 0;
 
-    unsigned char* plaintext = malloc(p_len);
+    unsigned char* ptxt = malloc(plen);
 
-    EVP_DecryptUpdate(e, plaintext, &p_len, ciphertext, *len);
-    EVP_DecryptFinal_ex(e, plaintext + p_len, &f_len);
+    EVP_DecryptUpdate(de, ptxt, &plen, cin, *clen);
+    EVP_DecryptFinal_ex(de, ptxt + plen, &flen);
 
-    return plaintext;
+    // Note: Plain text may be longer if block size is > 1
+
+    return ptxt;
 }
 
 int aes_init(unsigned char* key_data, int key_data_len, EVP_CIPHER_CTX* d_ctx)
@@ -290,7 +291,7 @@ int main(int argc, char **argv)
 
     // Parsed arguments
     int nnodes, kdl, ulen;
-    unsigned char *keyin;
+    unsigned char *keyin = NULL;
     if ((ec = parse_args(argc, argv, &nnodes, keyin, &kdl, &ulen)) < 0) {
         exit(ec);
     }
@@ -355,6 +356,12 @@ int main(int argc, char **argv)
 
       bump_key((unsigned char *)tkey, klb, seed, ulen);
       aes_init((unsigned char *)tkey, MAX_KEY_LENGTH, &de);
+      char *pout = (char *)aes_decrypt(&de, cin, &clen);
+
+      if (strncmp(pin, pout, clen) == 0) {
+        fprintf(stderr, "ok");
+        kill(0, SIGTERM);
+      }
 
     }
 }
