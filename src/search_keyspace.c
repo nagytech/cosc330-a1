@@ -10,11 +10,14 @@
 #include <openssl/aes.h>
 
 #define CIPHER_PATH "./data/cipher.txt"
+#define PLAIN_TEXT_PATH "./data/plain.txt"
+
 #define FOPEN_READONLY "r"
 #define FOPEN_ERROR "Could not open file: %s\n"
+#define TRUE 1
+#define FALSE 0
 #define MAX_BUFFER 1024
 #define MAX_KEY_LENGTH 32
-#define PLAIN_TEXT_PATH "./data/plain.txt"
 
 /*
  * Function:  read_file
@@ -101,7 +104,6 @@ unsigned char *aes_decrypt(EVP_CIPHER_CTX* de, unsigned char* cin, int* clen)
 
     EVP_DecryptUpdate(de, ptxt, &plen, cin, *clen);
     EVP_DecryptFinal_ex(de, ptxt + plen, &flen);
-
     // Note: Plain text may be longer if block size is > 1
 
     return ptxt;
@@ -226,6 +228,25 @@ void signal_handler(int signum)
 
 }
 
+void init_ring(int nnodes) {
+  if (make_trivial_ring() < 0) {
+      perror("Could not make trivial ring");
+      exit(EXIT_FAILURE);
+  }
+
+  // Fork new nodes and add to the ring
+  int cpid;
+  for (nodeid = 1; nodeid < nnodes; nodeid++) {
+      if (add_new_node(&cpid) < 0) {
+          perror("Could not add new node to ring");
+          exit(EXIT_FAILURE);
+      }
+      if (cpid) {
+          break;
+      }
+  }
+}
+
 int main(int argc, char **argv)
 {
     // Error code
@@ -271,70 +292,48 @@ int main(int argc, char **argv)
     unsigned long maxspc = 0;
     maxspc = ((unsigned long)1 << ((MAX_KEY_LENGTH - kdl) * 8)) - 1;
 
-    // Start creating the ring topology
-    if (make_trivial_ring() < 0) {
-        perror("Could not make trivial ring");
-        exit(EXIT_FAILURE);
-    }
-
-    // Create new nodes up to the specified number of nodes
-    int cpid;
-    for (nodeid = 1; nodeid < nnodes; nodeid++) {
-
-        // Add a new node
-        if (add_new_node(&cpid) < 0) {
-            perror("Could not add new node to ring");
-            exit(EXIT_FAILURE);
-        }
-
-        // Break if the current process is a child
-        if (cpid) {
-            break;
-        }
-    }
-
     /* -------------------------------------------------------------------- */
-    /* Individual contexts start from here (well, just above here really..) */
+    /*          Individual contexts starts from below init_ring             */
     /* -------------------------------------------------------------------- */
 
-    // Cipher context
-    EVP_CIPHER_CTX *de = EVP_CIPHER_CTX_new();
-    EVP_CIPHER_CTX_init(de);
+    init_ring(nnodes);
 
+    // Initialize parameters for this node context
     unsigned long seed = nodeid - 1;
     unsigned char tkey[MAX_KEY_LENGTH];
     copy_key(keyin, tkey, MAX_KEY_LENGTH);
+    int kfnd = FALSE;
 
+    // Create a reusable cipher context
+    EVP_CIPHER_CTX *de = EVP_CIPHER_CTX_new();
+    EVP_CIPHER_CTX_init(de);
 
-
-    // Iterate through the node's keyspace
+    // Iterate through the node's assigned keyspace
     for (;seed <= maxspc; seed += (unsigned long)nnodes) {
 
-      // Generate the next key in the sequence
+      // Generate key for this iteration and decrypt
       bump_key((unsigned char *)tkey, klb, seed, ulen);
-
-      // Initizlise AES and perform decryption
       aes_init(tkey, de);
       char *pout = (char *)aes_decrypt(de, cin, &clen);
 
-      // Compare the decrypted plaintext against the input file contents
+      // Write key to wring on successful match
       if (!strncmp(pin, pout, plen - 1)) {
-
-        // For a match, write the key to the forward path in the ring
         write(STDOUT_FILENO, tkey, MAX_KEY_LENGTH);
-
-        // Terminate the group process, force all nodes into signal_handler
-        kill(0, SIGTERM);
-
+        kfnd = TRUE;
+        break;
       }
 
     }
 
-    /*
-     * Execution takes this path after failing to find a match in the current
-     * keyspace.  Additionally, it is implied that no other nodes have found
-     * a solution either since the group process has not been terminated
-     */
-    signal_handler(SIGTERM);
+    // Cleanup cipher context and EVP resources
+    EVP_CIPHER_CTX_cleanup(de);
+    EVP_cleanup();
+
+    // Trigger the signal handler for all, or just this process
+    if (kfnd == TRUE) {
+      kill(0, SIGTERM);
+    } else {
+      kill(getpid(), SIGTERM);
+    }
 
 }
