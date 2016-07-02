@@ -1,14 +1,67 @@
+//#define _POSIX_SOURCE 1
 #include <string.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
 #include <errno.h>
+#include <signal.h>
+#include <sys/param.h>
 #include <openssl/evp.h>
 #include <openssl/aes.h>
 
+#define CIPHER_PATH "./data/cipher.txt"
+#define FOPEN_READONLY "r"
+#define FOPEN_ERROR "Could not open file: %s"
+#define MAX_BUFFER 1024
 #define MAX_KEY_LENGTH 32
-#define CIPHER_LENGTH 32
-#define MAX_BUFFER 4096
+#define PLAIN_TEXT_PATH "./data/plain.txt"
+
+/*
+ * Function:  read_file
+ * --------------------
+ * reads a file to the size of the buffer and streams the contents into
+ * the buffer.
+ *
+ * name      file name, relative path
+ * buf:      pointer to the buffer (out)
+ * len:      length of buffer in bytes
+ *
+ * returns: negative on error
+ */
+int read_file(char *name, unsigned char *buf, int len) {
+
+  // Open the file
+  FILE *f = fopen(name, FOPEN_READONLY); // TODO: binary, ciphers may have '\0'
+
+  // Check for error
+  if (f == NULL) {
+   fprintf(stderr, FOPEN_ERROR, name);
+   return(-1);
+  }
+
+  // Read into buffer
+  int read = fread(buf, len, 1, f);
+
+  // Free resources
+  fclose(f);
+
+#ifdef DEBUG
+
+  // Print out file contents
+  fprintf(stderr, "Read file %s as: ", name);
+  int cs = strlen(buf); // TODO: See 'binary' comment above
+  for(int y = 0; y < cs; y++) {
+   // TODO: If binary, only dump until EOF
+   fprintf(stderr, "%c", buf[y]);
+  }
+  fprintf(stderr, "\n");
+
+#endif
+
+  return(read);
+
+}
+
 
 int make_trivial_ring()
 {
@@ -62,9 +115,6 @@ aes_decrypt(EVP_CIPHER_CTX* e, unsigned char* ciphertext, int* len)
 int aes_init(unsigned char* key_data, int key_data_len, EVP_CIPHER_CTX* d_ctx)
 {
 
-    int i;
-    unsigned char key[MAX_KEY_LENGTH];
-
     if (key_data_len > MAX_KEY_LENGTH)
         key_data_len = MAX_KEY_LENGTH;
 
@@ -81,38 +131,46 @@ void bump_key(unsigned char* trialkey, unsigned long keyLowBits, int iteration,
     unsigned long trialLowBits = keyLowBits | iteration;
 
     for (int i = 0; i < missingBytes; i++) {
-        int index = MAX_KEY_LENGTH - i - 1;
-        // printf("Key bump index: %d\n", index);
-        char bumpChar = (unsigned char)(trialLowBits >> i * 8);
-        // printf("Key bump char: %c\n", index);
         trialkey[MAX_KEY_LENGTH - i - 1] = (unsigned char)(trialLowBits >> (i * 8));
     }
 }
 
-void read_file(char* name, void* buffer, int length)
+int parse_args(int argc, char **argv, int *nnode, unsigned char *kd, int *kdl,
+  int *ul)
 {
 
-    FILE* file;
-    file = fopen(name, "r");
-
-    if (file == NULL) {
-        // fprintf(stderr, "Could not open file: %s", name);
-        exit(EXIT_FAILURE);
+    // Validate number of arguments
+    if (argc != 3) {
+      fprintf(stderr, "Usage: %s nodecount keydata", argv[0]);
+      return (-1);
     }
 
-    fread(buffer, length, 1, file);
-    fclose(file);
-}
+    // Count and validate number of nodes to initialize
+    if ((*nnode = atoi(argv[1])) < 1 || *nnode > 16)  {
+      perror("Number of nodes limited to between 1 and 16.");
+      return(-2);
+    };
 
-int parse_args(int argc, char** argv, int* numnodes, unsigned char** key_data,
-    int* key_data_len)
-{
+    // Extract key data, check length
+    *kdl = MIN(strlen(argv[2]), MAX_KEY_LENGTH); // HACK: strlen fails on '\0'
 
-    *numnodes = atoi(argv[1]);
-    *key_data = (unsigned char*)argv[2];
-    *key_data_len = strlen(argv[2]);
-    if (*key_data_len > MAX_KEY_LENGTH) {
-        *key_data_len = MAX_KEY_LENGTH;
+    // Move key data to smaller memory space
+    unsigned char keyin[MAX_KEY_LENGTH];
+    // Note: strncpy won't work in the case of binary data inclusive of '\0'
+    for (int i = 0; i < *kdl; i++) {
+        keyin[i] = argv[2][i];
+    }
+    for (int i = *kdl; i < MAX_KEY_LENGTH; i++) {
+        keyin[i] = 0;
+    }
+
+    // Count missing bytes
+    *ul = MAX(MAX_KEY_LENGTH - *kdl, 0);
+    if (*ul > 4) {
+      fprintf(stderr, "Warning: processing %d bytes may take a while.", *kdl);
+    } else if (*ul == 0) {
+      fprintf(stderr, "Note: key length is greater than the max length (%d)",
+        MAX_KEY_LENGTH);
     }
 
     return 1;
@@ -132,13 +190,9 @@ int try_solve(char* keybase, int key_length, char* cipher_in,
 
     unsigned long trialLowBits = keyLowBits | seed;
 
-    // TODO: Use bump key
+    // TODO: gen trialkey once, then keep offsetting
 
     for (int i = 0; i < missingBytes; i++) {
-        int index = MAX_KEY_LENGTH - i - 1;
-        // printf("Key bump index: %d\n", index);
-        char bumpChar = (unsigned char)(trialLowBits >> (i * 8));
-        // printf("Key bump char: %c\n", bumpChar);
         trialkey[MAX_KEY_LENGTH - i - 1] = (unsigned char)(trialLowBits >> (i * 8));
     }
 
@@ -178,8 +232,26 @@ int try_solve(char* keybase, int key_length, char* cipher_in,
     }
 }
 
+/*
+ * Function:  copy_key
+ * -------------------
+ * Copies a char array from one space to another one byte at a time
+ *
+ * key:     pointer to the master copy
+ * buf:     buffer for copying to
+ * len:     length of the <key> string
+ *
+ */
+void copy_key(unsigned char *key, unsigned char *buf, int len) {
+
+  for (int i = 0; i < len; i++) {
+    buf[i] = key[i];
+  }
+
+}
+
 int nodeid;
-int signal_handler(int signum)
+void signal_handler(int signum)
 {
 
     fprintf(stderr, "%d exiting", nodeid);
@@ -205,110 +277,84 @@ int signal_handler(int signum)
      */
 }
 
-int nodeid;
-int main(int argc, char** argv)
+int main(int argc, char **argv)
 {
+    // Error code
+    int ec;
 
-    signal(SIGTERM, signal_handler);
-
-    /*
-     * Parse arguments
-     */
-    int numnodes,
-        key_data_len;
-    unsigned char* key_data;
-
-    if (parse_args(argc, argv, &numnodes, &key_data, &key_data_len) < 0) {
-        exit(-1);
+    // Set up signal handler
+    if (signal(SIGTERM, signal_handler) == SIG_ERR) {
+      perror("Failed to attach signal handler");
+      return(-1);
     }
 
-    printf("STARTKEY[[");
-    for (int y = 0; y < key_data_len; y++) {
-        printf("%c", key_data[y]);
-    }
-    printf("]]ENDKEY\n");
-
-    printf("Key Data Length: %d\n", key_data_len);
-
-    /*
-     * Perform some auxiliary calculations
-     */
-    int missingBytes = MAX_KEY_LENGTH - key_data_len;
-    printf("Missing Bytes: %d\n", missingBytes);
-
-    /*
-     * Read in files
-     */
-
-    unsigned char cipher_in[MAX_BUFFER];
-    read_file("./data/cipher.txt", &cipher_in, MAX_BUFFER);
-    int cipher_length = strlen((char*)cipher_in);
-
-    char plain_in[MAX_BUFFER];
-    read_file("./data/plain.txt", &plain_in, MAX_BUFFER);
-    int plain_length = strlen((char*)plain_in);
-
-    /*
-     * Copy key and pad with zeros
-     */
-
-    unsigned char key[MAX_KEY_LENGTH];
-
-    for (int i = 0; i < key_data_len; i++) {
-        key[i] = key_data[i];
+    // Parsed arguments
+    int nnodes, kdl, ulen;
+    unsigned char *keyin;
+    if ((ec = parse_args(argc, argv, &nnodes, keyin, &kdl, &ulen)) < 0) {
+        exit(ec);
     }
 
-    for (int i = key_data_len; i < MAX_KEY_LENGTH; i++) {
-        key[i] = 0;
+    // Read the cipher and plain text files into memory
+    unsigned char cin[MAX_BUFFER];
+    char pin[MAX_BUFFER];
+    ec = read_file(CIPHER_PATH, (unsigned char *)&cin, MAX_BUFFER);
+    if (ec < 0) {
+        exit(ec);
+    }
+    int clen = strlen((char*)cin);
+    ec = read_file(PLAIN_TEXT_PATH, (unsigned char *)&pin, MAX_BUFFER);
+    if (ec < 0) {
+        exit(ec);
     }
 
-    unsigned long keyLowBits = 0;
-
-    for (int i = 0; i < missingBytes; i++) {
-        int index = MAX_KEY_LENGTH - (missingBytes - 1) - 1;
-        // printf("Key bump index: %d\n", index);
-        keyLowBits |= ((unsigned long)(key[index] & 0xFFFF) << (missingBytes - i) * 8);
+    // Assign low bits for the unknown interval of the keyspace to the base key
+    unsigned long klb = 0;
+    for (int i = 0; i < ulen; i++) {
+        klb |= ((unsigned long)(
+          keyin[MAX_KEY_LENGTH - (ulen - 1) - 1] & 0xFFFF) << (ulen - i) * 8
+        );
     }
 
-    // TODO: Iterate dynamically
-    // keyLowBits = ((unsigned long)((unsigned long)(key[29] & 0xFFFF)<<
-    // 16)|
-    // ((unsigned long)(key[30] & 0xFFFF)<< 8)|
-    // ((unsigned long)(key[31] & 0xFFFF)));
+    // Find the cieling of the unknown keyspace
+    unsigned long maxspc = 0;
+    maxspc = ((unsigned long)1 << ((MAX_KEY_LENGTH - kdl) * 8)) - 1;
 
-    unsigned long maxSpace = 0;
-
-    maxSpace = ((unsigned long)1 << ((MAX_KEY_LENGTH - key_data_len) * 8)) - 1;
-
-    printf("Max space: %lu\n", maxSpace);
-
+    // Start creating the ring topology
     if (make_trivial_ring() < 0) {
         perror("Could not make trivial ring");
         exit(EXIT_FAILURE);
     }
 
-    int childpid;
-    for (nodeid = 1; nodeid < numnodes; nodeid++) {
+    // Create new nodes up to the specified number of nodes
+    int cpid;
+    for (nodeid = 1; nodeid < nnodes; nodeid++) {
 
-        if (add_new_node(&childpid) < 0) {
+        // Add a new node
+        if (add_new_node(&cpid) < 0) {
             perror("Could not add new node to ring");
             exit(EXIT_FAILURE);
         }
 
-        if (childpid) {
+        // Break if the current process is a child
+        if (cpid) {
             break;
         }
     }
 
-    unsigned long seed = nodeid;
-    while (seed <= maxSpace) {
-        char buffer[MAX_BUFFER];
-        if (try_solve(key, MAX_KEY_LENGTH, cipher_in, cipher_length, plain_in,
-                missingBytes, seed, keyLowBits)
-            > 0) {
-            kill(0, SIGTERM);
-            break;
-        }
-        seed += numnodes;
+    /* -------------------------------------------------------------------- */
+    /* Individual contexts start from here (well, just above here really..) */
+    /* -------------------------------------------------------------------- */
+
+    EVP_CIPHER_CTX de;
+    unsigned long seed = nodeid - 1;
+    unsigned char tkey[MAX_KEY_LENGTH];
+    copy_key(keyin, tkey, MAX_KEY_LENGTH);
+
+    for (;seed <= maxspc; seed += (unsigned long)nnodes) {
+
+      bump_key((unsigned char *)tkey, klb, seed, ulen);
+      aes_init((unsigned char *)tkey, MAX_KEY_LENGTH, &de);
+
     }
 }
