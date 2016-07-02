@@ -4,10 +4,18 @@ INCLUDES =
   INCLUDES = -I/usr/local/Cellar/openssl/1.0.2a-1/include/ 
 #endif
 
-CFLAGS = -g -pg -Wall -pedantic
+BASEFLAGS = -Wall -pedantic
+#ifdef DEBUG
+CFLAGS = -g -pg ${BASEFLAGS}
+#else
+CFLAGS = ${BASEFLAGS}
+#endif
+
+
+
 LIBS = -lcrypto
 
-EXES = decrypt_ciphertext generate_ciphertext search_keyspace search_multi
+EXES = decrypt_ciphertext generate_ciphertext search_keyspace
 
 all: ${EXES}
 
@@ -20,9 +28,6 @@ generate_ciphertext:	src/generate_ciphertext.c
 
 search_keyspace:	src/search_keyspace.c
 	${COMPILER} ${INCLUDES} ${CFLAGS} -o search_keyspace src/search_keyspace.c ${LIBS}
-
-search_multi:	src/search_multi.c
-	${COMPILER} ${INCLUDES} ${CFLAGS} -o search_multi src/search_multi.c ${LIBS}
 
 
 clean:
