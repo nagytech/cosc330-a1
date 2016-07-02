@@ -35,12 +35,17 @@ int read_file(char *name, unsigned char *buf, int len) {
 
   // Check for error
   if (f == NULL) {
-   fprintf(stderr, FOPEN_ERROR, name);
-   return(-1);
+    perror("Failed to open file.");
+    fprintf(stderr, FOPEN_ERROR, name);
+    exit(-1);
   }
 
   // Read into buffer
   int read = fread(buf, len, 1, f);
+  if (read < 0) {
+    perror("Empty file");
+    exit(-2);
+  }
 
   // Free resources
   fclose(f);
@@ -104,7 +109,7 @@ unsigned char *aes_decrypt(EVP_CIPHER_CTX* de, unsigned char* cin, int* clen)
 
 int aes_init(unsigned char* keyin, EVP_CIPHER_CTX* d_ctx)
 {
-    EVP_CIPHER_CTX_init(d_ctx);
+
     EVP_DecryptInit_ex(d_ctx, EVP_aes_256_cbc(), NULL, keyin, keyin);
 
     return 0;
@@ -237,10 +242,7 @@ int main(int argc, char **argv)
     int clen = strlen((char*)cin);
 
     // Read plain text file into memory
-    ec = read_file(PLAIN_TEXT_PATH, (unsigned char *)&pin, MAX_BUFFER);
-    if (ec < 0) {
-        exit(ec);
-    }
+    read_file(PLAIN_TEXT_PATH, (unsigned char *)&pin, MAX_BUFFER);
     int plen = strlen(pin);
 
     // Assign low bits for the unknown interval of the keyspace to the base key
@@ -281,23 +283,45 @@ int main(int argc, char **argv)
     /* Individual contexts start from here (well, just above here really..) */
     /* -------------------------------------------------------------------- */
 
+    // Cipher context
     EVP_CIPHER_CTX de;
+
     unsigned long seed = nodeid - 1;
     unsigned char tkey[MAX_KEY_LENGTH];
     copy_key(keyin, tkey, MAX_KEY_LENGTH);
 
+    EVP_CIPHER_CTX_init(&de);
+
+    // Iterate through the node's keyspace
     for (;seed <= maxspc; seed += (unsigned long)nnodes) {
+
+      // Generate the next key in the sequence
       bump_key((unsigned char *)tkey, klb, seed, ulen);
+
+
+
+      // Initizlise AES and perform decryption
       aes_init(tkey, &de);
       char *pout = (char *)aes_decrypt(&de, cin, &clen);
 
+      // Compare the decrypted plaintext against the input file contents
       if (!strncmp(pin, pout, plen - 1)) {
+
+        // For a match, write the key to the forward path in the ring
         write(STDOUT_FILENO, tkey, MAX_KEY_LENGTH);
-        break;
+
+        // Terminate the group process, force all nodes into signal_handler
+        kill(0, SIGTERM);
+
       }
 
     }
 
-    kill(0, SIGTERM);
+    /*
+     * Execution takes this path after failing to find a match in the current
+     * keyspace.  Additionally, it is implied that no other nodes have found
+     * a solution either since the group process has not been terminated
+     */
+    signal_handler(SIGTERM);
 
 }
