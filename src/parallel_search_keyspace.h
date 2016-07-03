@@ -12,6 +12,8 @@
 #define MAX_BUFFER 1024
 #define MAX_KEY_LENGTH 32
 
+int nodeid;
+
 int add_new_node(int* pid);
 unsigned char *aes_decrypt(EVP_CIPHER_CTX* de, unsigned char* cin, int* clen);
 int aes_init(unsigned char* keyin, EVP_CIPHER_CTX* d_ctx);

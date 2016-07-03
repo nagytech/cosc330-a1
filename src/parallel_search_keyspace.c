@@ -11,8 +11,6 @@
 
 #include "parallel_search_keyspace.h"
 
-int nodeid;
-
 /*
  * Parallel Search Keyspace
  * -------------------------
@@ -104,12 +102,22 @@ int main(int argc, char **argv)
     // Trigger the signal handler for all, or just this process
     if (kfnd == TRUE) {
       kill(0, SIGTERM);
-    } else {
-      kill(getpid(), SIGTERM);
     }
 
 }
 
+/*
+ * Function: add_new_node
+ * ----------------------
+ * Forks a new process and attaches it to the current ring.
+ *
+ * arguments:
+ * pid:      child process id from the fork (out)
+ *
+ * remarks: binary keys containing \0 cannot currently be processed
+ *
+ * returns: negative on error
+ */
 int add_new_node(int* pid)
 {
     int fd[2];
@@ -118,6 +126,7 @@ int add_new_node(int* pid)
     if ((*pid = fork()) == -1)
         return (-2);
 #ifdef DEBUG
+    // Assists gdb in tracing child processes
     extern void _start (void), etext (void);
     monstartup ((unsigned long) &_start, (unsigned long) &etext);
 #endif
@@ -130,6 +139,21 @@ int add_new_node(int* pid)
     return (0);
 }
 
+/*
+ * Function: aes_decrypt
+ * ---------------------
+ * Decrypts a length of cipher text using the EVP cipher context
+ *
+ * arguments:
+ * de:      initialized evp cipher context with known/guessed key
+ * cin:     cipher text input
+ * dlen:    length of cipher text (out)
+ *
+ * remarks: output text may be longer if the block size is not 1.  As a result
+ * clen may be updated
+ *
+ * returns: decrypted text
+ */
 unsigned char *aes_decrypt(EVP_CIPHER_CTX* de, unsigned char* cin, int* clen)
 {
     int plen = *clen;
@@ -139,31 +163,54 @@ unsigned char *aes_decrypt(EVP_CIPHER_CTX* de, unsigned char* cin, int* clen)
 
     EVP_DecryptUpdate(de, ptxt, &plen, cin, *clen);
     EVP_DecryptFinal_ex(de, ptxt + plen, &flen);
-    // Note: Plain text may be longer if block size is > 1
 
     return ptxt;
 }
 
+/*
+ * Function: aes_init
+ * ------------------
+ * Initialize AES for decription
+ *
+ * arguments:
+ * keyin:      known or guessed key
+ * d_ctx:      EVP cipher context
+ *
+ * returns: negative on error
+ */
 int aes_init(unsigned char* keyin, EVP_CIPHER_CTX* d_ctx)
 {
     int ec = EVP_DecryptInit_ex(d_ctx, EVP_aes_256_cbc(), NULL, keyin, keyin);
     if (ec < 1) {
       perror("Failed to initialize EVP decryption");
-      // TODO: maybe return error code so the current thread can die gracefully
+      // TODO: maybe return error code so current thread can die gracefully?
       kill(0, SIGTERM);
     }
     return 0;
 }
 
-void bump_key(unsigned char* trialkey, unsigned long keyLowBits, int iteration,
-    int missingBytes)
+/*
+ * Function: bump_key
+ * ------------------
+ * Initialize AES for decription
+ *
+ * arguments:
+ * tkey:      trial key base (out)
+ * d_ctx:     EVP cipher context
+ * c:         offset from the start of the keyspace
+ * ulen:      length of the unknown space in bytes
+ *
+ * remarks: the trial key can be reused multiple times since we only rewrite
+ * in the unknown space and the key never changes in size
+ */
+void bump_key(unsigned char* tkey, unsigned long klb, int c, int ulen)
 {
 
-    unsigned long trialLowBits = keyLowBits | iteration;
-
-    for (int i = 0; i < missingBytes; i++) {
-        trialkey[MAX_KEY_LENGTH - i - 1] = (unsigned char)(trialLowBits >> (i * 8));
+    unsigned long tlb = klb | c;
+    for (int i = 0; i < ulen; i++) {
+        tkey[MAX_KEY_LENGTH - i - 1] = (unsigned char)(tlb >> (i * 8));
     }
+
 }
 
 /*
@@ -184,6 +231,15 @@ void copy_key(unsigned char *key, unsigned char *buf, int len) {
 
 }
 
+/*
+ * Function:  init_ring
+ * -------------------
+ * Transform the current process into a ring of processes connected by pipes
+ *
+ * n:     number of processes in the ring, total including master
+ *
+ * returns: node id (1 based)
+ */
 int init_ring(int n) {
 
   if (make_trivial_ring() < 0) {
@@ -203,8 +259,16 @@ int init_ring(int n) {
       }
   }
   return i;
+
 }
 
+/*
+ * Function:  make_trivial_ring
+ * -------------------
+ * Creates a ring from the current process alone
+ *
+ * returns: negative on failure
+ */
 int make_trivial_ring()
 {
     int fd[2];
@@ -217,6 +281,20 @@ int make_trivial_ring()
     return (0);
 }
 
+/*
+ * Function:  parse_args
+ * -------------------
+ * Parse the args from main and perform some auxiliary calculations
+ *
+ * argc:  arg count from main
+ * argv:  arg array from main
+ * nnode: number of nodes (out)
+ * kd:    key data (out)
+ * kdl:   key data length (out)
+ * ul:    unknown length (out)
+ *
+ * returns: negative on failure
+ */
 int parse_args(int argc, char **argv, int *nnode, unsigned char *kd, int *kdl,
   int *ul)
 {
@@ -296,41 +374,41 @@ int read_file(char *name, unsigned char *buf, int len)
 
 }
 
+/*
+ * Function:  signal_handler
+ * --------------------
+ * Handles the SIGTERM signal which is sent after a node finished the
+ * search space
+ *
+ * signum      signal type
+ */
 void signal_handler(int signum)
 {
+  // Block until key is written to STDIN
+  unsigned char buffer[MAX_KEY_LENGTH] = {0};
 
-    unsigned char buffer[MAX_KEY_LENGTH];
+  if (nodeid == 1) {
 
-    // Block until something is written to STDIN
+    //write(STDOUT_FILENO, buffer, MAX_KEY_LENGTH);
     read(STDIN_FILENO, buffer, MAX_KEY_LENGTH);
 
-    /* --- STDIN RECEIVED --- */
+    // TODO: Check for valid key
 
-    // Check if the current node is a child
-    if (nodeid > 1) {
-
-      /* --- CHILD NODE --- */
-
-      // Child process which has already read data should write, then exit
-      write(STDOUT_FILENO, buffer, MAX_KEY_LENGTH);
-      exit(0);
-
-    }
-
-    /* --- MASTER NODE --- */
-
-    // TODO: This needs to go to stdout, not stderr
-
-    // Print out the buffer contents which will be the valid key
+    // Print out the valid key
     for (int i = 0; i < 32; i++) {
-      // Note: we iterate since the key is pure binary and may contain \0's
-      fprintf(stderr, "%c", buffer[i]);
+      fprintf(stderr, "%c", buffer[i]); // TODO: stdout, not stderr
     }
     fprintf(stderr, "\n");
 
     // TODO: Maybe try to encrypt with the key so we really know it's valid
 
-    // Terminate, which should cascade to any processes that have not already
     exit(0);
+  }
+
+  if (signum == SIGCHLD) {
+    read(STDIN_FILENO, buffer, MAX_KEY_LENGTH);
+    write(STDOUT_FILENO, buffer, MAX_KEY_LENGTH);
+    exit(0);
+  }
 
 }
