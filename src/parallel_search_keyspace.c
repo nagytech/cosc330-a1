@@ -387,7 +387,7 @@ int read_file(char *name, unsigned char *buf, int len)
 void signal_handler(int signum)
 {
   // Block until key is written to STDIN
-  unsigned char buffer[MAX_KEY_LENGTH] = {0};
+  unsigned char buffer[MAX_KEY_LENGTH];
 
   if (nodeid == 1) {
 
@@ -405,12 +405,12 @@ void signal_handler(int signum)
     // TODO: Maybe try to encrypt with the key so we really know it's valid
 
     exit(0);
-  }
+  } else {
 
-  if (signum == SIGCHLD) {
     read(STDIN_FILENO, buffer, MAX_KEY_LENGTH);
     write(STDOUT_FILENO, buffer, MAX_KEY_LENGTH);
     exit(0);
+
   }
 
 }
