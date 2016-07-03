@@ -16,6 +16,10 @@
  * -------------------------
  * Executes a parallel process brute force attack against an RSA encryption key.
  *
+ * author:    Jonathan Nagy <jnagy@myune.edu.au>
+ * studentid: (220103482)
+ * date:      3 July 2016
+ *
  * arguments:
  * 0:      number of processes to spawn
  * 1:      known bytes of the encryption key
