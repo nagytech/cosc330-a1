@@ -102,6 +102,8 @@ int main(int argc, char **argv)
     // Trigger the signal handler for all, or just this process
     if (kfnd == TRUE) {
       kill(0, SIGTERM);
+    } else {
+      kill(getpid(), SIGTERM);
     }
 
 }
