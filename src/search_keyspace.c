@@ -1,339 +1,176 @@
-//#define _POSIX_SOURCE 1
 #include <string.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <unistd.h>
-#include <errno.h>
-#include <signal.h>
-#include <sys/param.h>
 #include <openssl/evp.h>
 #include <openssl/aes.h>
-
-#define CIPHER_PATH "./data/cipher.txt"
-#define PLAIN_TEXT_PATH "./data/plain.txt"
-
-#define FOPEN_READONLY "r"
-#define FOPEN_ERROR "Could not open file: %s\n"
-#define TRUE 1
-#define FALSE 0
-#define MAX_BUFFER 1024
-#define MAX_KEY_LENGTH 32
-
-/*
- * Function:  read_file
- * --------------------
- * reads a file to the size of the buffer and streams the contents into
- * the buffer.
- *
- * name      file name, relative path
- * buf:      pointer to the buffer (out)
- * len:      length of buffer in bytes
- *
- * returns: negative on error
- */
-int read_file(char *name, unsigned char *buf, int len) {
-
-  // Open the file
-  FILE *f = fopen(name, FOPEN_READONLY); // TODO: binary, ciphers may have '\0'
-
-  // Check for error
-  if (f == NULL) {
-    perror("Failed to open file.");
-    fprintf(stderr, FOPEN_ERROR, name);
-    exit(-1);
-  }
-
-  // Read into buffer
-  int read = fread(buf, len, 1, f);
-  if (read < 0) {
-    perror("Empty file");
-    exit(-2);
-  }
-
-  // Free resources
-  fclose(f);
-
-  return(read);
-
-}
-
-
-int make_trivial_ring()
-{
-    int fd[2];
-    if (pipe(fd) == -1)
-        return (-1);
-    if ((dup2(fd[0], STDIN_FILENO) == -1) || (dup2(fd[1], STDOUT_FILENO) == -1))
-        return (-2);
-    if ((close(fd[0]) == -1) || (close(fd[1]) == -1))
-        return (-3);
-    return (0);
-}
-
-int add_new_node(int* pid)
-{
-    int fd[2];
-    if (pipe(fd) == -1)
-        return (-1);
-    if ((*pid = fork()) == -1)
-        return (-2);
-#ifdef DEBUG
-    extern void _start (void), etext (void);
-    monstartup ((unsigned long) &_start, (unsigned long) &etext);
-#endif
-    if (*pid > 0 && dup2(fd[1], STDOUT_FILENO) < 0)
-        return (-3);
-    if (*pid == 0 && dup2(fd[0], STDIN_FILENO) < 0)
-        return (-4);
-    if ((close(fd[0]) == -1) || (close(fd[1]) == -1))
-        return (-5);
-    return (0);
-}
-
-void copy_key(unsigned char *key, unsigned char *buf, int len);
 
 /*
  * Decrypt *len bytes of ciphertext
  */
-unsigned char *aes_decrypt(EVP_CIPHER_CTX* de, unsigned char* cin, int* clen)
+unsigned char *aes_decrypt(EVP_CIPHER_CTX *e, unsigned char *ciphertext, int *len)
 {
-    int plen = *clen;
-    int flen = 0;
+  /* plaintext will always be equal to or lesser than length of ciphertext*/
+  int p_len = *len, f_len = 0;
+  unsigned char *plaintext = malloc(p_len);
+  
+  EVP_DecryptInit_ex(e, NULL, NULL, NULL, NULL);
+  EVP_DecryptUpdate(e, plaintext, &p_len, ciphertext, *len);
+  EVP_DecryptFinal_ex(e, plaintext+p_len, &f_len);
 
-    unsigned char* ptxt = malloc(plen);
-
-    EVP_DecryptUpdate(de, ptxt, &plen, cin, *clen);
-    EVP_DecryptFinal_ex(de, ptxt + plen, &flen);
-    // Note: Plain text may be longer if block size is > 1
-
-    return ptxt;
+  //*len = p_len + f_len;
+  return plaintext;
 }
 
-int aes_init(unsigned char* keyin, EVP_CIPHER_CTX* d_ctx)
-{
-    int ec = EVP_DecryptInit_ex(d_ctx, EVP_aes_256_cbc(), NULL, keyin, keyin);
-    if (ec < 1) {
-      perror("Failed to initialize EVP decryption");
-      // TODO: maybe return error code so the current thread can die gracefully
-      kill(0, SIGTERM);
-    }
-    return 0;
-}
+int aes_init(unsigned char *key_data, int key_data_len, EVP_CIPHER_CTX *e_ctx, EVP_CIPHER_CTX *d_ctx){
 
-void bump_key(unsigned char* trialkey, unsigned long keyLowBits, int iteration,
-    int missingBytes)
-{
+  int i, nrounds = 5;
+  unsigned char key[32], iv[32];
+  //Some robust programming to start with
+  //Only use most significant 32 bytes of data if > 32 bytes
+  if(key_data_len > 32) key_data_len =32;
 
-    unsigned long trialLowBits = keyLowBits | iteration;
-
-    for (int i = 0; i < missingBytes; i++) {
-        trialkey[MAX_KEY_LENGTH - i - 1] = (unsigned char)(trialLowBits >> (i * 8));
-    }
-}
-
-int parse_args(int argc, char **argv, int *nnode, unsigned char *kd, int *kdl,
-  int *ul)
-{
-
-    // Validate number of arguments
-    if (argc != 3) {
-      fprintf(stderr, "Usage: %s nodecount keydata\n", argv[0]);
-      return (-1);
-    }
-
-    // Count and validate number of nodes to initialize
-    if ((*nnode = atoi(argv[1])) < 1 || *nnode > 16)  {
-      perror("Number of nodes limited to between 1 and 16.");
-      return(-2);
-    };
-
-    // Extract key data, check length
-    *kdl = MIN(strlen(argv[2]), MAX_KEY_LENGTH); // HACK: strlen fails on '\0'
-
-    // Move key data to smaller memory space
-    // Note: strncpy won't work in the case of binary data inclusive of '\0'
-    for (int i = 0; i < *kdl; i++) {
-        kd[i] = argv[2][i];
-    }
-    for (int i = *kdl; i < MAX_KEY_LENGTH; i++) {
-        kd[i] = 0;
-    }
-
-    // Count missing bytes
-    *ul = MAX(MAX_KEY_LENGTH - *kdl, 0);
-    if (*ul > 4) {
-      fprintf(stderr, "Warning: processing %d bytes may take a while.\n", *kdl);
-    } else if (*ul == 0) {
-      fprintf(stderr, "Note: key length is not less than the max length: %d\n",
-        MAX_KEY_LENGTH);
-    }
-
-    return 1;
-}
-
-
-/*
- * Function:  copy_key
- * -------------------
- * Copies a char array from one space to another one byte at a time
- *
- * key:     pointer to the master copy
- * buf:     buffer for copying to
- * len:     length of the <key> string
- *
- */
-void copy_key(unsigned char *key, unsigned char *buf, int len) {
-
-  for (int i = 0; i < len; i++) {
-    buf[i] = key[i];
+  //Copy bytes to the front of the key array
+  for (i=0;i<key_data_len; i++){
+     key[i] = key_data[i];
+     iv[i] = key_data[i];
   }
+  for (i=key_data_len;i<32;i++){
+     key[i] = 0;
+     iv[i] = 0;
+  } 
+  //Were not using the key gen process as we assume the key has already bee created in this way.
 
+  /*
+   * Gen key & IV for AES 256 CBC mode. A SHA1 digest is used to hash the supplied key material.
+   * nrounds is the number of times the we hash the material. More rounds are more secure but
+   * slower.
+   */
+  //i = EVP_BytesToKey(EVP_aes_256_cbc(), EVP_sha1(), salt, key_data, key_data_len, nrounds, key, iv);
+  //if (i != 32) {
+  //  return -1;
+  //}
+
+  EVP_CIPHER_CTX_init(e_ctx);
+  EVP_EncryptInit_ex(e_ctx, EVP_aes_256_cbc(), NULL, key, iv);
+  EVP_CIPHER_CTX_init(d_ctx);
+  EVP_DecryptInit_ex(d_ctx, EVP_aes_256_cbc(), NULL, key, iv);
+
+  return 0;
 }
 
-int nodeid;
-void signal_handler(int signum)
-{
+int main(int argc, char **argv){
+   unsigned char *key_data;
+   int  key_data_len, i;
+   char *plaintext;
+    key_data = (unsigned char *)argv[1];
+    key_data_len = strlen(argv[1]);
 
-    unsigned char buffer[MAX_KEY_LENGTH];
 
-    // Block until something is written to STDIN
-    read(STDIN_FILENO, buffer, MAX_KEY_LENGTH);
+    unsigned char key[32], iv[32];
+    unsigned char trialkey[32];
+    
+    int cipher_length = 32;
+    FILE *mycipherfile;    
+    mycipherfile=fopen("cipher.txt","r");
+    unsigned char cipher_in[4096];
+    int c_in = 0;
+    unsigned char c;
+    fread(cipher_in, cipher_length, 1, mycipherfile);
+    
+    FILE *myplainfile;    
+    myplainfile=fopen("plain.txt","r");
+    char plain_in[4096];
+    fread(plain_in, 28, 1, myplainfile);
+   
+     int y;
+     printf("\nPlain:");
+     for(y=0;y<28;y++){
+              printf("%c",plain_in[y]);  
+     }
+     printf("\n");
+     printf("\nCipher:");
+     for(y=0;y<32;y++){
+              printf("%c",cipher_in[y]);  
+     }
+    //Only use most significant 32 bytes of data if > 32 bytes
+    if(key_data_len > 32) key_data_len =32;
 
-    /* --- STDIN RECEIVED --- */
-
-    // Check if the current node is a child
-    if (nodeid > 1) {
-
-      /* --- CHILD NODE --- */
-
-      // Child process which has already read data should write, then exit
-      write(STDOUT_FILENO, buffer, MAX_KEY_LENGTH);
-      exit(0);
-
+     //Copy bytes to the front of the key array
+    for (i=0;i<key_data_len; i++){
+     
+       key[i] = key_data[i];
+       iv[i] = key_data[i];
+       trialkey[i] = key_data[i];
     }
 
-    /* --- MASTER NODE --- */
+     //If the key data < 32 bytes, pad the remaining bytes with 0s
+     //int key_diff = 32 - key_data_len;
 
-    // Print out the buffer contents which will be the valid key
-    for (int i = 0; i < 32; i++) {
-      // Note: we iterate since the key is pure binary and may contain \0's
-      fprintf(stderr, "%c", buffer[i]);
-    }
-    fprintf(stderr, "\n");
+     for (i=key_data_len;i<32;i++){
+       key[i] = 0;
+       iv[i] = 0;
+       trialkey[i] = 0;
+     }
 
-    // TODO: Maybe try to encrypt with the key so we really know it's valid
+     unsigned long keyLowBits = 0;
+     keyLowBits = ((unsigned long)(key[24] & 0xFFFF)<< 56)|
+				((unsigned long)(key[25] & 0xFFFF)<< 48)|
+				((unsigned long)(key[26] & 0xFFFF)<< 40)|
+				((unsigned long)(key[27] & 0xFFFF)<< 32)|
+				((unsigned long)(key[28] & 0xFFFF)<< 24)|
+				((unsigned long)(key[29] & 0xFFFF)<< 16)|
+				((unsigned long)(key[30] & 0xFFFF)<< 8)|
+				((unsigned long)(key[31] & 0xFFFF));
 
-    // Terminate, which should cascade to any processes that have not already
-    exit(0);
 
-}
+      //printf("\n\nkeylowbits: %lu", keyLowBits);
+      int trial_key_length=32;
+      unsigned long  maxSpace = 0;
+      maxSpace = ((unsigned long)1 << ((trial_key_length - key_data_len)*8))-1;
+      unsigned long counter;
+      //printf("Maxspace: %lu %lu\n",((trial_key_length - key_data_len)*8), maxSpace);
+      for(counter=0; counter < maxSpace ; counter++){
+         unsigned long trialLowBits = keyLowBits | counter;
+         
+         trialkey[25] = (unsigned char) (trialLowBits >> 48);
+         trialkey[26] = (unsigned char) (trialLowBits >> 40);
+         trialkey[27] = (unsigned char) (trialLowBits >> 32);
+	 trialkey[28] = (unsigned char) (trialLowBits >> 24);
+	 trialkey[29] = (unsigned char) (trialLowBits >> 16);
+	 trialkey[30] = (unsigned char) (trialLowBits >> 8);
+         trialkey[31] = (unsigned char) (trialLowBits);
+         //if(counter ==56){
+         	EVP_CIPHER_CTX en, de;
+         	if (aes_init(trialkey, trial_key_length, &en, &de)) {
+            	   printf("Couldn't initialize AES cipher\n");
+            	   return -1;
+         	}
+         //if(counter ==56){
+         	plaintext = (char *)aes_decrypt(&de, (unsigned char *)cipher_in, &cipher_length);
+                EVP_CIPHER_CTX_cleanup(&en);
+                EVP_CIPHER_CTX_cleanup(&de);
+         	//printf("\nKey %lu:%s plain: %s",counter, trialkey, plaintext);
+         	int y;
 
-void init_ring(int nnodes) {
-  if (make_trivial_ring() < 0) {
-      perror("Could not make trivial ring");
-      exit(EXIT_FAILURE);
-  }
+    		if (strncmp(plaintext, plain_in, 28)); 
+     			 //printf("\nFAIL: enc/dec failed for \"%s\"\n", plain_in);
+    		else{ 
+     			printf("\nOK: enc/dec ok for \"%s\"\n", plaintext);
+		
 
-  // Fork new nodes and add to the ring
-  int cpid;
-  for (nodeid = 1; nodeid < nnodes; nodeid++) {
-      if (add_new_node(&cpid) < 0) {
-          perror("Could not add new node to ring");
-          exit(EXIT_FAILURE);
-      }
-      if (cpid) {
-          break;
-      }
-  }
-}
-
-int main(int argc, char **argv)
-{
-    // Error code
-    int ec;
-
-    // Set up signal handler
-    if (signal(SIGTERM, signal_handler) == SIG_ERR) {
-      perror("Failed to attach signal handler");
-      return(-1);
-    }
-
-    // Parsed arguments
-    int nnodes, kdl, ulen;
-    unsigned char keyin[MAX_KEY_LENGTH];
-    if ((ec = parse_args(argc, argv, &nnodes, keyin, &kdl, &ulen)) < 0) {
-        exit(ec);
-    }
-
-    // Allocate buffers for reading files
-    unsigned char cin[MAX_BUFFER];
-    char pin[MAX_BUFFER];
-
-    // Read cipher binary file into memory
-    ec = read_file(CIPHER_PATH, (unsigned char *)&cin, MAX_BUFFER);
-    if (ec < 0) {
-        exit(ec);
-    }
-    int clen = strlen((char*)cin);
-
-    // Read plain text file into memory
-    read_file(PLAIN_TEXT_PATH, (unsigned char *)&pin, MAX_BUFFER);
-    int plen = strlen(pin);
-
-    // Assign low bits for the unknown interval of the keyspace to the base key
-    unsigned long klb = 0;
-    for (int i = 0; i < ulen; i++) {
-        klb |= ((unsigned long)(
-          keyin[MAX_KEY_LENGTH - (ulen - 1) - 1] & 0xFFFF) << (ulen - i) * 8
-        );
-    }
-
-    // Find the cieling of the unknown keyspace
-    unsigned long maxspc = 0;
-    maxspc = ((unsigned long)1 << ((MAX_KEY_LENGTH - kdl) * 8)) - 1;
-
-    /* -------------------------------------------------------------------- */
-    /*          Individual contexts starts from below init_ring             */
-    /* -------------------------------------------------------------------- */
-
-    init_ring(nnodes);
-
-    // Initialize parameters for this node context
-    unsigned long seed = nodeid - 1;
-    unsigned char tkey[MAX_KEY_LENGTH];
-    copy_key(keyin, tkey, MAX_KEY_LENGTH);
-    int kfnd = FALSE;
-
-    // Create a reusable cipher context
-    EVP_CIPHER_CTX *de = EVP_CIPHER_CTX_new();
-    EVP_CIPHER_CTX_init(de);
-
-    // Iterate through the node's assigned keyspace
-    for (;seed <= maxspc; seed += (unsigned long)nnodes) {
-
-      // Generate key for this iteration and decrypt
-      bump_key((unsigned char *)tkey, klb, seed, ulen);
-      aes_init(tkey, de);
-      char *pout = (char *)aes_decrypt(de, cin, &clen);
-
-      // Write key to wring on successful match
-      if (!strncmp(pin, pout, plen - 1)) {
-        write(STDOUT_FILENO, tkey, MAX_KEY_LENGTH);
-        kfnd = TRUE;
-        break;
+         		printf("Key No.:%d:", counter);
+         		for(y=0;y<32;y++){
+              			printf("%c",trialkey[y]); 
+	 		}
+			printf("\n");
+			break;
+		}
+         	free(plaintext);
+	//}
       }
 
-    }
+     
 
-    // Cleanup cipher context and EVP resources
-    EVP_CIPHER_CTX_cleanup(de);
-    EVP_cleanup();
 
-    // Trigger the signal handler for all, or just this process
-    if (kfnd == TRUE) {
-      kill(0, SIGTERM);
-    } else {
-      kill(getpid(), SIGTERM);
-    }
 
 }

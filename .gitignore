@@ -1,5 +1,6 @@
 decrypt_ciphertext
 generate_ciphertext
 search_keyspace
+psk
 *.dSYM
 gmon.out
