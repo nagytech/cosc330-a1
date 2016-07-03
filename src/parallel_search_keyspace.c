@@ -72,7 +72,7 @@ int main(int argc, char **argv)
     nodeid = init_ring(nnodes);
 
     // Initialize parameters for this node context
-    unsigned long seed = nodeid;
+    unsigned long seed = nodeid - 1;
     unsigned char tkey[MAX_KEY_LENGTH];
     copy_key(keyin, tkey, MAX_KEY_LENGTH);
     int kfnd = FALSE;
@@ -185,6 +185,7 @@ void copy_key(unsigned char *key, unsigned char *buf, int len) {
 }
 
 int init_ring(int n) {
+
   if (make_trivial_ring() < 0) {
       perror("Could not make trivial ring");
       exit(EXIT_FAILURE);
@@ -247,9 +248,9 @@ int parse_args(int argc, char **argv, int *nnode, unsigned char *kd, int *kdl,
     // Count missing bytes
     *ul = MAX(MAX_KEY_LENGTH - *kdl, 0);
     if (*ul > 4) {
-      fprintf(stderr, "Warning: processing %d bytes may take a while.\n", *kdl);
+      fprintf(stderr, "Warn: processing %d bytes may take a while.\n", *kdl);
     } else if (*ul == 0) {
-      fprintf(stderr, "Note: key length is not less than the max length: %d\n",
+      fprintf(stderr, "Warn: key length is not less than the max length: %d\n",
         MAX_KEY_LENGTH);
     }
 
@@ -306,7 +307,7 @@ void signal_handler(int signum)
     /* --- STDIN RECEIVED --- */
 
     // Check if the current node is a child
-    if (nodeid > 0) {
+    if (nodeid > 1) {
 
       /* --- CHILD NODE --- */
 
