@@ -188,7 +188,6 @@ int aes_init(unsigned char* keyin, EVP_CIPHER_CTX* d_ctx)
     int ec = EVP_DecryptInit_ex(d_ctx, EVP_aes_256_cbc(), NULL, keyin, keyin);
     if (ec < 1) {
       perror("Failed to initialize EVP decryption");
-      // TODO: maybe return error code so current thread can die gracefully?
       kill(0, SIGTERM);
     }
     return 0;
@@ -398,21 +397,24 @@ void signal_handler(int signum)
     write(STDOUT_FILENO, buffer, MAX_KEY_LENGTH);
     read(STDIN_FILENO, buffer, MAX_KEY_LENGTH);
 
+    // Reopen output to stdout since ring is disbanded
+    freopen("/dev/tty", "a", stdout);
+
     // Check to see if we've received the empty buffer
     int keyfd = FALSE;
-    for (int i = 0; i < 32; i++) {
+    for (int i = 0; i < MAX_KEY_LENGTH; i++) {
       keyfd |= buffer[i] != '\0';
     }
     if (keyfd == FALSE) {
-      fprintf(stderr, "No key found for given data.");
+      fprintf(stderr, "No key found for given data.\n");
       exit(-1);
     }
 
     // Print out the valid key
-    for (int i = 0; i < 32; i++) {
-      fprintf(stderr, "%c", buffer[i]); // TODO: stdout, not stderr
+    for (int i = 0; i < MAX_KEY_LENGTH; i++) {
+      printf("%c", buffer[i]);
     }
-    fprintf(stderr, "\n");
+    printf("\n");
 
     // TODO: Maybe try to encrypt with the key so we really know it's valid
 
