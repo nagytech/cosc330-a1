@@ -390,14 +390,23 @@ int read_file(char *name, unsigned char *buf, int len)
 void signal_handler(int signum)
 {
   // Block until key is written to STDIN
-  unsigned char buffer[MAX_KEY_LENGTH];
+  unsigned char buffer[MAX_KEY_LENGTH] = {0};
 
   if (nodeid == 1) {
 
-    //write(STDOUT_FILENO, buffer, MAX_KEY_LENGTH);
+    // Parent node writes empty buffer to indicate failure then waits
+    write(STDOUT_FILENO, buffer, MAX_KEY_LENGTH);
     read(STDIN_FILENO, buffer, MAX_KEY_LENGTH);
 
-    // TODO: Check for valid key
+    // Check to see if we've received the empty buffer
+    int keyfd = FALSE;
+    for (int i = 0; i < 32; i++) {
+      keyfd |= buffer[i] != '\0';
+    }
+    if (keyfd == FALSE) {
+      fprintf(stderr, "No key found for given data.");
+      exit(-1);
+    }
 
     // Print out the valid key
     for (int i = 0; i < 32; i++) {
@@ -410,6 +419,7 @@ void signal_handler(int signum)
     exit(0);
   } else {
 
+    // Child node simply passes buffer through and quits
     read(STDIN_FILENO, buffer, MAX_KEY_LENGTH);
     write(STDOUT_FILENO, buffer, MAX_KEY_LENGTH);
     exit(0);
