@@ -10,6 +10,8 @@
 
 #include "parallel_search_keyspace.h"
 
+int nodeid;
+
 /*
  * Parallel Search Keyspace
  * -------------------------
