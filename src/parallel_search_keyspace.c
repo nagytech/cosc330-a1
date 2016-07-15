@@ -23,16 +23,18 @@
  * 0:      number of processes to spawn
  * 1:      known bytes of the encryption key
  *
- * remarks: binary keys containing \0 cannot currently be processed
+ * remarks: Binary keys containing \0 cannot currently be processed because
+ * input arguments are split on the null character.  To resolve this issue,
+ * we would need to read the key from stdin, or from a file.  At the moment,
+ * however, command line arguments should be sufficient.
  *
  * returns: output the key to stdout on success, nothing on failure
  */
 int main(int argc, char **argv)
 {
-    // Error code
     int ec;
 
-    // Set up signal handler
+    // Set up signal handler for cleanup routine
     if (signal(SIGTERM, signal_handler) == SIG_ERR) {
       perror("Failed to attach signal handler");
       return(-1);
@@ -61,7 +63,7 @@ int main(int argc, char **argv)
         );
     }
 
-    // Find the cieling of the unknown keyspace
+    // Find the ceiling of the unknown keyspace
     unsigned long maxspc = 0;
     maxspc = ((unsigned long)1 << ((MAX_KEY_LENGTH - kdl) * 8)) - 1;
 
@@ -72,8 +74,8 @@ int main(int argc, char **argv)
     // Initialize ring topology
     nodeid = init_ring(nnodes);
 
-    // Initialize parameters for this node context
-    unsigned long seed = nodeid - 1;
+    // Initialize parameters for >this< node context
+    unsigned long seed = maxspc - (nodeid - 1);
     unsigned char tkey[MAX_KEY_LENGTH];
     copy_key(keyin, tkey, MAX_KEY_LENGTH);
     int kfnd = FALSE;
@@ -83,7 +85,7 @@ int main(int argc, char **argv)
     EVP_CIPHER_CTX_init(de);
 
     // Iterate through the node's assigned keyspace and decrypt cipher
-    for (;seed <= maxspc; seed += (unsigned long)nnodes) {
+    for (;seed >= 1; seed -= (unsigned long)nnodes) {
 
       bump_key((unsigned char *)tkey, klb, seed, ulen);
       aes_init(tkey, de);
@@ -102,7 +104,7 @@ int main(int argc, char **argv)
     EVP_CIPHER_CTX_cleanup(de);
     EVP_cleanup();
 
-    // Trigger the signal handler for all, or just this process
+    // Enter the exit stage
     if (kfnd == TRUE) {
       kill(0, SIGTERM);
     } else {
@@ -163,11 +165,12 @@ unsigned char *aes_decrypt(EVP_CIPHER_CTX* de, unsigned char* cin, int* clen)
 {
     int plen = *clen;
     int flen = 0;
+    int ec;
 
     unsigned char* ptxt = malloc(plen);
 
-    EVP_DecryptUpdate(de, ptxt, &plen, cin, *clen);
-    EVP_DecryptFinal_ex(de, ptxt + plen, &flen);
+    ec = EVP_DecryptUpdate(de, ptxt, &plen, cin, *clen);
+    ec = EVP_DecryptFinal_ex(de, ptxt + plen, &flen);
 
     return ptxt;
 }
@@ -175,7 +178,7 @@ unsigned char *aes_decrypt(EVP_CIPHER_CTX* de, unsigned char* cin, int* clen)
 /*
  * Function: aes_init
  * ------------------
- * Initialize AES for decription
+ * Initialize AES for decryption
  *
  * arguments:
  * keyin:      known or guessed key
@@ -196,7 +199,7 @@ int aes_init(unsigned char* keyin, EVP_CIPHER_CTX* d_ctx)
 /*
  * Function: bump_key
  * ------------------
- * Initialize AES for decription
+ * Overwrite the unknown bytes of the input key with the next guess
  *
  * arguments:
  * tkey:      trial key base (out)
@@ -220,7 +223,7 @@ void bump_key(unsigned char* tkey, unsigned long klb, int c, int ulen)
 /*
  * Function:  copy_key
  * -------------------
- * Copies a char array from one space to another one byte at a time
+ * Copy a char array from one space to another one byte at a time
  *
  * key:     pointer to the master copy
  * buf:     buffer for copying to
@@ -416,7 +419,7 @@ void signal_handler(int signum)
     }
     printf("\n");
 
-    // TODO: Maybe try to encrypt with the key so we really know it's valid
+    // TODO: Maybe try to encrypt with the key so we really know it's valid?
 
     exit(0);
   } else {
